@@ -1,0 +1,1 @@
+export default function Offline(){return <main className="home"><div className="eyebrow">RAPONE BOCCE</div><h1>Sei offline.</h1><p>Controlla la connessione e riprova. I dati pubblici visualizzati potrebbero essere quelli dell’ultimo aggiornamento.</p></main>}

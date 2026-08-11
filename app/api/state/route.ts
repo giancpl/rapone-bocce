@@ -1,0 +1,1 @@
+import{NextResponse}from"next/server";import{getTournament,publicTournament}from"../../../lib/tournament-v2";export const dynamic="force-dynamic";export async function GET(){try{return NextResponse.json(publicTournament(await getTournament()))}catch{return NextResponse.json(null,{status:503})}}

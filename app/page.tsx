@@ -1,0 +1,1 @@
+import Public from "../components/Public";import {pub} from "../lib/state";export const dynamic="force-dynamic";export default async function Home(){return <Public initial={await pub()}/>}

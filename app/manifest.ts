@@ -1,0 +1,1 @@
+import type{MetadataRoute}from"next";export default function manifest():MetadataRoute.Manifest{return{name:"Rapone Bocce",short_name:"Rapone Bocce",description:"Gestione e tabellone del torneo Rapone Bocce",start_url:"/",display:"standalone",background_color:"#f5f3ec",theme_color:"#214c38",lang:"it",icons:[{src:"/icon.svg",sizes:"any",type:"image/svg+xml",purpose:"any"}]}}
