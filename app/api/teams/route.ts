@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getTournament, regenerateDraw } from "../../../lib/tournament-v2";
+import { getTournamentSummary, regenerateDraw } from "../../../lib/tournament-v2";
 import { prisma } from "../../../lib/db";
 import { requireAdmin } from "../../../lib/auth";
 import { MAX_NAME_LENGTH } from "../../../lib/security";
@@ -23,7 +23,7 @@ function pair(body: any) { const playerOne = text(body.playerOne, "Primo giocato
 
 export async function GET() {
   try {
-    const tournament = await getTournament();
+    const tournament = await getTournamentSummary();
     if (!tournament) throw Error("Torneo non trovato");
     await requireAdmin(tournament.id);
     const payments = await prisma.team.findMany({ where: { tournamentId: tournament.id }, select: { id: true, paidAt: true } });
@@ -33,21 +33,21 @@ export async function GET() {
 
 export async function POST(request: Request) {
   try {
-    const tournament = await getTournament();
+    const tournament = await getTournamentSummary();
     if (!tournament) throw Error("Torneo non trovato");
     await requireAdmin(tournament.id);
     await canChangeStructure(tournament);
     if (await prisma.team.count({ where: { tournamentId: tournament.id } }) >= MAX_TEAMS) throw Error("Sono ammesse al massimo " + MAX_TEAMS + " coppie");
     const values = pair(await request.json().catch(() => ({})));
-    await prisma.team.create({ data: { tournamentId: tournament.id, ...values } });
+    const team = await prisma.team.create({ data: { tournamentId: tournament.id, ...values }, select: { id: true, name: true, playerOne: true, playerTwo: true } });
     const regenerated = Boolean(await regenerateDraw(tournament.id));
-    return NextResponse.json({ ok: true, regenerated });
+    return NextResponse.json({ ok: true, regenerated, team });
   } catch (error: any) { return response(error); }
 }
 
 export async function PATCH(request: Request) {
   try {
-    const tournament = await getTournament();
+    const tournament = await getTournamentSummary();
     if (!tournament) throw Error("Torneo non trovato");
     await requireAdmin(tournament.id);
     const body = await request.json().catch(() => ({}));
@@ -60,13 +60,13 @@ export async function PATCH(request: Request) {
     const values = pair(body);
     const updated = await prisma.team.updateMany({ where: { id, tournamentId: tournament.id }, data: values });
     if (!updated.count) throw Error("Coppia non trovata");
-    return NextResponse.json({ ok: true });
+    return NextResponse.json({ ok: true, team: { id, ...values } });
   } catch (error: any) { return response(error); }
 }
 
 export async function DELETE(request: Request) {
   try {
-    const tournament = await getTournament();
+    const tournament = await getTournamentSummary();
     if (!tournament) throw Error("Torneo non trovato");
     await requireAdmin(tournament.id);
     await canChangeStructure(tournament);
@@ -75,6 +75,6 @@ export async function DELETE(request: Request) {
     const deleted = await prisma.team.deleteMany({ where: { id, tournamentId: tournament.id } });
     if (!deleted.count) throw Error("Coppia non trovata");
     const regenerated = Boolean(await regenerateDraw(tournament.id));
-    return NextResponse.json({ ok: true, regenerated });
+    return NextResponse.json({ ok: true, regenerated, id });
   } catch (error: any) { return response(error); }
 }

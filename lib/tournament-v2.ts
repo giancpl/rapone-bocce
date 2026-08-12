@@ -9,6 +9,10 @@ export const PUBLIC_INCLUDE = {
 
 const displayName = (team: { name: string; playerOne?: string | null; playerTwo?: string | null }) => team.playerOne && team.playerTwo ? `${team.playerOne} / ${team.playerTwo}` : team.name;
 
+export async function getTournamentSummary() {
+  return prisma.tournament.findFirst({ orderBy: { createdAt: "desc" }, select: { id: true, status: true, drawMode: true, startedAt: true, finishedAt: true } });
+}
+
 export async function getTournament() {
   const tournament = await prisma.tournament.findFirst({ orderBy: { createdAt: "desc" }, include: PUBLIC_INCLUDE });
   if (tournament?.status === "LIVE" && tournament.teams.length >= 2 && tournament.matches.length > 0 && tournament.matches.every(match => match.status === "FINISHED")) {
@@ -75,12 +79,8 @@ async function advanceByes(tx: any, tournamentId: string) {
 }
 
 async function schedule(tx: any, tournamentId: string) {
+  // La coda resta esplicita: solo l'organizzatore chiama le coppie e le porta in campo.
   await tx.match.updateMany({ where: { tournamentId, status: "SCHEDULED", teamAId: { not: null }, teamBId: { not: null } }, data: { status: "READY", field: null } });
-  const occupied = await tx.match.count({ where: { tournamentId, status: { in: ["WAITING", "LIVE"] } } });
-  const slots = Math.max(0, 2 - occupied);
-  if (!slots) return;
-  const next = await tx.match.findMany({ where: { tournamentId, status: "READY", teamAId: { not: null }, teamBId: { not: null } }, orderBy: [{ round: "asc" }, { position: "asc" }], take: slots });
-  for (const match of next) await tx.match.update({ where: { id: match.id }, data: { status: "WAITING", field: null } });
 }
 
 export async function generateDraw(tournamentId: string, drawMode: "PRELIMINARIES" | "REPECHAGE" = "PRELIMINARIES", rebuild = false) {

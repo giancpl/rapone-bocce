@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { assignRepechage, finalizeRepechage, generateDraw, getTournament, resetTournament, unassignRepechage } from "../../../lib/tournament-v2";
+import { assignRepechage, finalizeRepechage, generateDraw, getTournamentSummary, resetTournament, unassignRepechage } from "../../../lib/tournament-v2";
 import { requireAdmin } from "../../../lib/auth";
 
 function mode(value: unknown) { return value === "REPECHAGE" ? "REPECHAGE" : "PRELIMINARIES" as const; }
@@ -7,7 +7,7 @@ function failure(error: any) { const message = error?.message || "Errore"; retur
 
 export async function POST(request: Request) {
   try {
-    const tournament = await getTournament();
+    const tournament = await getTournamentSummary();
     if (!tournament) throw Error("Torneo non trovato");
     await requireAdmin(tournament.id);
     const body = await request.json().catch(() => ({}));
@@ -18,7 +18,7 @@ export async function POST(request: Request) {
 
 export async function PATCH(request: Request) {
   try {
-    const tournament = await getTournament();
+    const tournament = await getTournamentSummary();
     if (!tournament) throw Error("Torneo non trovato");
     await requireAdmin(tournament.id);
     const body = await request.json().catch(() => ({}));

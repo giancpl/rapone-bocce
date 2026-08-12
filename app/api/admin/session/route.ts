@@ -1,11 +1,11 @@
 import { NextResponse } from "next/server";
 import { requireAdmin } from "../../../../lib/auth";
-import { getTournament } from "../../../../lib/tournament-v2";
+import { getTournamentSummary } from "../../../../lib/tournament-v2";
 
 export const dynamic = "force-dynamic";
 export async function GET() {
   try {
-    const tournament = await getTournament();
+    const tournament = await getTournamentSummary();
     if (!tournament) return NextResponse.json({ authenticated: false });
     await requireAdmin(tournament.id);
     return NextResponse.json({ authenticated: true }, { headers: { "Cache-Control": "no-store" } });
