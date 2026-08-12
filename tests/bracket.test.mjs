@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { assertBocceScore, availableFields, bracketSize, cascadeCoordinates, firstRoundSlots, MAX_TEAMS, nextMatchCoordinate, repechagePlan, shuffleItems } from "../lib/bracket.ts";
+import { assertBocceScore, bracketSize, cascadeCoordinates, firstRoundSlots, MAX_TEAMS, nextMatchCoordinate, repechagePlan, shuffleItems } from "../lib/bracket.ts";
 
 test("every supported team count creates a traversable first round", () => {
   for (let count = 2; count <= MAX_TEAMS; count++) {
@@ -20,12 +20,9 @@ test("invalid team counts and bocce scores are rejected", () => {
   assert.doesNotThrow(() => assertBocceScore(14, 13));
 });
 
-test("next slots and two-field scheduling remain deterministic", () => {
+test("next slots remain deterministic", () => {
   assert.deepEqual(nextMatchCoordinate(1, 0), { round: 2, position: 0, slot: "a" });
   assert.deepEqual(nextMatchCoordinate(1, 1), { round: 2, position: 0, slot: "b" });
-  assert.deepEqual(availableFields([1, null]), [2]);
-  assert.deepEqual(availableFields([1, 2]), []);
-  assert.deepEqual(availableFields([]), [1, 2]);
 });
 
 

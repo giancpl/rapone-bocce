@@ -1,6 +1,6 @@
 import { Prisma } from "../app/generated/prisma/client";
 import { prisma } from "./db";
-import { assertBocceScore, availableFields, bracketSize, cascadeCoordinates, firstRoundSlots, repechagePlan, shuffleItems } from "./bracket";
+import { assertBocceScore, bracketSize, cascadeCoordinates, firstRoundSlots, repechagePlan, shuffleItems } from "./bracket";
 
 export const PUBLIC_INCLUDE = {
   matches: { orderBy: [{ round: "asc" as const }, { position: "asc" as const }], include: { teamA: true, teamB: true, winner: true } },
@@ -75,10 +75,10 @@ async function advanceByes(tx: any, tournamentId: string) {
 }
 
 async function schedule(tx: any, tournamentId: string) {
-  const live = await tx.match.findMany({ where: { tournamentId, status: "LIVE" }, select: { field: true } });
-  const available = availableFields(live.map((match: any) => match.field));
-  const open = await tx.match.findMany({ where: { tournamentId, status: "SCHEDULED", teamAId: { not: null }, teamBId: { not: null } }, orderBy: [{ round: "asc" }, { position: "asc" }], take: available.length });
-  for (const [index, match] of open.entries()) await tx.match.update({ where: { id: match.id }, data: { status: "LIVE", field: available[index], startedAt: new Date() } });
+  const live = await tx.match.count({ where: { tournamentId, status: "LIVE" } });
+  if (live) return;
+  const next = await tx.match.findFirst({ where: { tournamentId, status: "SCHEDULED", teamAId: { not: null }, teamBId: { not: null } }, orderBy: [{ round: "asc" }, { position: "asc" }] });
+  if (next) await tx.match.update({ where: { id: next.id }, data: { status: "LIVE", field: null, startedAt: new Date() } });
 }
 
 export async function generateDraw(tournamentId: string, drawMode: "PRELIMINARIES" | "REPECHAGE" = "PRELIMINARIES") {
