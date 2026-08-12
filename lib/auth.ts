@@ -18,6 +18,10 @@ export async function requireAdmin(tournamentId:string){
   if(!s || s.tournamentId!==tournamentId || s.expiresAt<=new Date()) throw new Error("NON_AUTORIZZATO");
   return s;
 }
+export async function confirmAdminPassword(tournamentId:string,password:string){
+  const tournament=await prisma.tournament.findUnique({where:{id:tournamentId},select:{adminPasswordHash:true}});
+  return Boolean(tournament && typeof password==="string" && await verifyPassword(password,tournament.adminPasswordHash));
+}
 export async function logout(){
   const raw=(await cookies()).get(SESSION_COOKIE)?.value;
   if(raw) await prisma.adminSession.deleteMany({where:{tokenHash:hashToken(raw)}});

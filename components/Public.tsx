@@ -1,7 +1,7 @@
 "use client";
 
 import Image from "next/image";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import logo from "../logo-hd.png";
 
 const OFFICIAL_START = new Date("2026-08-13T16:00:00+02:00");
@@ -74,13 +74,13 @@ export default function Public({ initial, preview = false }: { initial: Tourname
   }
 
   const live = tournament.matches.filter(match => match.status === "LIVE");
-  const active = tournament.matches.filter(match => ["WAITING", "LIVE"].includes(match.status) && match.a && match.b);
-  const next = tournament.matches.filter(match => ["READY", "SCHEDULED"].includes(match.status) && match.a && match.b);
+  const active = tournament.matches.filter(match => match.status === "LIVE" && match.a && match.b);
+  const next = tournament.matches.filter(match => ["READY", "WAITING", "SCHEDULED"].includes(match.status) && match.a && match.b);
   const completed = tournament.matches.filter(match => match.status === "FINISHED" && match.a && match.b);
   const totalRounds = [...new Set(tournament.matches.map(match => match.round))].length;
   const champion = tournament.status === "FINISHED" && completed.length ? completed.find(match => match.round === Math.max(...completed.map(item => item.round)))?.winner : null;
 
-  return <main className="publicApp"><PublicHero tournament={tournament} live={live.length} next={next.length} completed={completed.length} totalRounds={totalRounds} />{champion && <section className="champion"><span className="championBadge">1</span><div><p className="kicker">Coppia vincitrice</p><strong>{champion}</strong></div></section>}<nav className="sectionNav" aria-label="Navigazione torneo"><a href="#incontri">Incontri{live.length ? <b>{live.length}</b> : null}</a><a href="#tabellone">Tabellone</a><a href="#risultati">Risultati{completed.length ? <b>{completed.length}</b> : null}</a></nav>{error && <p className="softError">Aggiornamento al prossimo tentativo: {error}</p>}<MatchHighlights active={active} next={next} /><section className="boardSection bracketSection" id="tabellone"><div className="sectionHeading"><div><p className="kicker">Tabellone</p><h2>Verso la finale</h2></div><span className="muted">Usa le frecce o scorri orizzontalmente</span></div><BracketGuide drawMode={tournament.drawMode} matches={tournament.matches} /><Bracket matches={tournament.matches} /></section><section className="boardSection" id="risultati"><div className="sectionHeading"><div><p className="kicker">Archivio</p><h2>Risultati</h2></div><span className="muted">{completed.length} incontri conclusi</span></div><ResultArchive matches={completed} totalRounds={totalRounds} /></section><footer className="siteFooter">Aggiornato alle {new Date(tournament.updatedAt).toLocaleTimeString("it-IT", { hour: "2-digit", minute: "2-digit" })}</footer></main>;
+  return <main className="publicApp"><PublicHero tournament={tournament} live={live.length} next={next.length} completed={completed.length} totalRounds={totalRounds} />{champion && <section className="champion"><span className="championBadge">1</span><div><p className="kicker">Coppia vincitrice</p><strong>{champion}</strong></div></section>}<nav className="sectionNav" aria-label="Navigazione torneo"><a href="#incontri">Incontri{live.length ? <b>{live.length}</b> : null}</a><a href="#tabellone">Tabellone</a><a href="#risultati">Risultati{completed.length ? <b>{completed.length}</b> : null}</a></nav>{error && <p className="softError">Aggiornamento al prossimo tentativo: {error}</p>}<MatchHighlights active={active} next={next} /><section className="boardSection bracketSection" id="tabellone"><div className="sectionHeading"><div><p className="kicker">Tabellone</p><h2>Verso la finale</h2></div><span className="muted">Scorri orizzontalmente per vedere tutti i turni</span></div><BracketGuide drawMode={tournament.drawMode} matches={tournament.matches} /><Bracket matches={tournament.matches} /></section><section className="boardSection" id="risultati"><div className="sectionHeading"><div><p className="kicker">Archivio</p><h2>Risultati</h2></div><span className="muted">{completed.length} incontri conclusi</span></div><ResultArchive matches={completed} totalRounds={totalRounds} /></section><footer className="siteFooter">Aggiornato alle {new Date(tournament.updatedAt).toLocaleTimeString("it-IT", { hour: "2-digit", minute: "2-digit" })}</footer></main>;
 }
 
 function Brand() {
@@ -98,11 +98,11 @@ function PublicHero({ tournament, live, next, completed, totalRounds }: { tourna
 }
 
 function MatchHighlights({ active, next }: { active: Match[]; next: Match[] }) {
-  return <section className="boardSection matchHighlights" id="incontri"><div className="sectionHeading"><div><p className="kicker">Incontri</p><h2>Segui il torneo</h2></div><span className={active.some(match => match.status === "LIVE") ? "liveDot" : "muted"}>{active.some(match => match.status === "LIVE") ? "Aggiornamento live" : "Calendario aggiornato"}</span></div><div className="matchHub"><section className="matchLane activeLane"><div className="laneHeading"><div><span className="laneStatus">Adesso</span><h3>Giocatori chiamati e incontri in corso</h3></div><b>{active.length}</b></div><div className="matchGrid">{active.map(match => <MatchCard key={match.id} match={match} prominent={match.status === "LIVE"} />)}{!active.length && <Empty text="Nessun incontro è attivo in questo momento." />}</div></section><section className="matchLane nextLane"><div className="laneHeading"><div><span className="laneStatus">In coda</span><h3>Da chiamare</h3></div><b>{next.length}</b></div><div className="matchGrid">{next.slice(0, 4).map(match => <MatchCard key={match.id} match={match} />)}{!next.length && <Empty text="I prossimi abbinamenti compariranno qui." />}</div></section></div></section>;
+  return <section className="boardSection matchHighlights" id="incontri"><div className="sectionHeading"><div><p className="kicker">Incontri</p><h2>Segui il torneo</h2></div><span className={active.some(match => match.status === "LIVE") ? "liveDot" : "muted"}>{active.some(match => match.status === "LIVE") ? "Aggiornamento live" : "Calendario aggiornato"}</span></div><div className="matchHub"><section className="matchLane activeLane"><div className="laneHeading"><div><span className="laneStatus">Adesso</span><h3>In corso</h3></div><b>{active.length}</b></div><div className="matchGrid">{active.map(match => <MatchCard key={match.id} match={match} prominent={match.status === "LIVE"} />)}{!active.length && <Empty text="Nessun incontro è attivo in questo momento." />}</div></section><section className="matchLane nextLane"><div className="laneHeading"><div><span className="laneStatus">In coda</span><h3>In attesa</h3></div><b>{next.length}</b></div><div className="matchGrid">{next.slice(0, 4).map(match => <MatchCard key={match.id} match={match} />)}{!next.length && <Empty text="Gli incontri in attesa compariranno qui." />}</div></section></div></section>;
 }
 
 function TournamentStats({ teams, live, next, completed, totalRounds }: { teams: number; live: number; next: number; completed: number; totalRounds: number }) {
-  return <div className="tournamentStats" aria-label="Riepilogo torneo"><span><b>{teams}</b><small>coppie</small></span><span><b>{live}</b><small>live</small></span><span><b>{next}</b><small>prossimi</small></span><span><b>{completed}</b><small>risultati</small></span>{totalRounds > 0 && <span><b>{totalRounds}</b><small>turni</small></span>}</div>;
+  return <div className="tournamentStats" aria-label="Riepilogo torneo"><span><b>{teams}</b><small>coppie</small></span><span><b>{live}</b><small>live</small></span><span><b>{next}</b><small>in attesa</small></span><span><b>{completed}</b><small>risultati</small></span>{totalRounds > 0 && <span><b>{totalRounds}</b><small>turni</small></span>}</div>;
 }
 
 function RegistrationForm({ playerOne, playerTwo, setPlayerOne, setPlayerTwo, submit, sending, message }: RegistrationFormProps) {
@@ -122,23 +122,16 @@ function roundName(round: number, total: number) {
   return remaining === 64 ? "32-esimi" : remaining === 32 ? "16-esimi" : remaining === 16 ? "Ottavi" : remaining === 8 ? "Quarti" : remaining === 4 ? "Semifinali" : "Finale";
 }
 
-function BracketGuide({ drawMode, matches }: { drawMode?: Tournament["drawMode"]; matches: Match[] }) { const active = matches.filter(match => ["WAITING", "LIVE"].includes(match.status)).length; const ready = matches.filter(match => match.status === "READY").length; return <div className="bracketGuide"><b>{drawMode === "REPECHAGE" ? "Formula con ripescaggi" : "Formula con preliminari"}</b><span>{drawMode === "REPECHAGE" ? "I preliminari producono la classifica delle migliori sconfitte; l’organizzazione completa poi gli abbinamenti." : "Le coppie senza avversario avanzano automaticamente al turno successivo."}</span><small>{active} da gestire · {ready} pronti in coda</small></div>; }
+function BracketGuide({ drawMode, matches }: { drawMode?: Tournament["drawMode"]; matches: Match[] }) { const active = matches.filter(match => match.status === "LIVE").length; const ready = matches.filter(match => ["READY", "WAITING"].includes(match.status)).length; return <div className="bracketGuide"><b>{drawMode === "REPECHAGE" ? "Formula con ripescaggi" : "Formula con preliminari"}</b><span>{drawMode === "REPECHAGE" ? "I preliminari producono la classifica delle migliori sconfitte; l’organizzazione completa poi gli abbinamenti." : "Le coppie senza avversario avanzano automaticamente al turno successivo."}</span><small>{active} in corso · {ready} in attesa</small></div>; }
 
 function Bracket({ matches }: { matches: Match[] }) {
   const rounds = useMemo(() => [...new Set(matches.map(match => match.round))].sort((a, b) => a - b), [matches]);
-  const scroll = useRef<HTMLDivElement>(null);
   const currentRound = useMemo(() => {
     const live = matches.find(match => match.status === "LIVE")?.round;
     const next = matches.find(match => ["LIVE", "WAITING", "READY", "SCHEDULED"].includes(match.status) && match.a && match.b)?.round;
     return live ?? next ?? rounds.at(-1) ?? rounds[0];
   }, [matches, rounds]);
-  const move = (direction: number) => scroll.current?.scrollBy({ left: direction * Math.min(520, scroll.current.clientWidth * .8), behavior: "smooth" });
-  useEffect(() => {
-    const node = scroll.current;
-    const target = node?.querySelector<HTMLElement>(`[data-round="${currentRound}"]`);
-    if (node && target) node.scrollLeft = Math.max(0, target.offsetLeft - (node.clientWidth - target.offsetWidth) / 2);
-  }, [currentRound, rounds.length]);
-  return <div className="bracketExplorer"><div className="bracketTools" aria-label="Comandi tabellone"><button type="button" onClick={() => move(-1)} aria-label="Turni precedenti">←</button><span>{currentRound ? roundName(currentRound, rounds.length) : "Tabellone"}</span><button type="button" onClick={() => move(1)} aria-label="Turni successivi">→</button></div><div className="bracketScroll" ref={scroll} tabIndex={0} aria-label="Tabellone a eliminazione diretta"><div className="bracket">{rounds.map(round => <div className={"bracketRound " + (round === currentRound ? "current" : "")} data-round={round} key={round}><div className="roundLabel"><span>{roundName(round, rounds.length)}</span><small>{matches.filter(match => match.round === round).length} incontri</small></div><div className="roundMatches">{matches.filter(match => match.round === round).map(match => <MatchCard key={match.id} match={match} bracket totalRounds={rounds.length} />)}</div></div>)}</div></div></div>;
+  return <div className="bracketExplorer"><div className="bracketCurrent"><span>Turno attuale</span><b>{currentRound ? roundName(currentRound, rounds.length) : "Tabellone"}</b><small>Scorri con il dito o il trackpad</small></div><div className="bracketScroll" tabIndex={0} aria-label="Tabellone a eliminazione diretta"><div className="bracket">{rounds.map(round => <div className={"bracketRound " + (round === currentRound ? "current" : "")} data-round={round} key={round}><div className="roundLabel"><span>{roundName(round, rounds.length)}</span><small>{matches.filter(match => match.round === round).length} incontri</small></div><div className="roundMatches">{matches.filter(match => match.round === round).map(match => <MatchCard key={match.id} match={match} bracket totalRounds={rounds.length} />)}</div></div>)}</div></div></div>;
 }
 
 function ResultArchive({ matches, totalRounds }: { matches: Match[]; totalRounds: number }) {
@@ -150,7 +143,7 @@ function ResultArchive({ matches, totalRounds }: { matches: Match[]; totalRounds
 
 function MatchCard({ match, prominent = false, compact = false, bracket = false, totalRounds = 0 }: { match: Match; prominent?: boolean; compact?: boolean; bracket?: boolean; totalRounds?: number }) {
   const isBye = match.status === "FINISHED" && Boolean(match.a) !== Boolean(match.b);
-  const label = isBye ? "Passaggio automatico" : match.status === "LIVE" ? "In corso" : match.status === "WAITING" ? "Giocatori chiamati" : match.status === "READY" ? "Da chiamare" : match.status === "SCHEDULED" ? "In attesa abbinamento" : "Conclusa";
+  const label = isBye ? "Passaggio automatico" : match.status === "LIVE" ? "In corso" : ["WAITING", "READY", "SCHEDULED"].includes(match.status) ? "In attesa" : "Finita";
   const scoreA = match.status === "FINISHED" && !isBye ? match.scoreA : "-";
   const scoreB = match.status === "FINISHED" && !isBye ? match.scoreB : "-";
   const destination = bracket && totalRounds ? match.round === totalRounds ? "La coppia vincente diventa campione" : <>Coppia vincente → <b>{roundName(match.round + 1, totalRounds)}</b><em>slot {match.position % 2 === 0 ? "A" : "B"}</em></> : null;

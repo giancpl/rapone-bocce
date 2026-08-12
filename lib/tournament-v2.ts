@@ -128,13 +128,13 @@ export async function startTournament(tournamentId: string) {
 
 const validScore = assertBocceScore;
 
-export async function updateMatchStatus(tournamentId: string, matchId: string, status: "READY" | "WAITING" | "LIVE") {
+export async function updateMatchStatus(tournamentId: string, matchId: string, status: "READY" | "LIVE") {
   return prisma.$transaction(async tx => {
     const match = await tx.match.findFirst({ where: { id: matchId, tournamentId } });
     if (!match || !match.teamAId || !match.teamBId || match.status === "FINISHED") throw Error("Stato incontro non modificabile");
-    if (status === "WAITING" || status === "LIVE") {
-      const occupied = await tx.match.count({ where: { tournamentId, status: { in: ["WAITING", "LIVE"] }, id: { not: match.id } } });
-      if (occupied >= 2) throw Error("Sono già presenti due incontri da gestire: libera prima uno slot");
+    if (status === "LIVE") {
+      const occupied = await tx.match.count({ where: { tournamentId, status: "LIVE", id: { not: match.id } } });
+      if (occupied >= 2) throw Error("Sono già presenti due incontri in corso: concludine uno prima di avviarne un altro");
     }
     await tx.match.update({ where: { id: match.id }, data: { status, field: null, startedAt: status === "LIVE" ? new Date() : null } });
   }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
@@ -190,11 +190,10 @@ export async function resetTournament(tournamentId: string) {
   return prisma.$transaction(async tx => {
     const tournament = await tx.tournament.findUnique({ where: { id: tournamentId } });
     if (!tournament) throw Error("Torneo non trovato");
-    if (tournament.status === "LIVE" || tournament.status === "FINISHED" || tournament.startedAt) {
-      throw Error("Il torneo ufficiale è già iniziato e non può essere azzerato");
-    }
     await tx.match.deleteMany({ where: { tournamentId } });
-    return tx.tournament.update({ where: { id: tournamentId }, data: { status: "SETUP", startedAt: null, finishedAt: null, repechageFinalizedAt: null } });
+    await tx.registration.deleteMany({ where: { tournamentId } });
+    await tx.team.deleteMany({ where: { tournamentId } });
+    return tx.tournament.update({ where: { id: tournamentId }, data: { status: "SETUP", drawMode: "PRELIMINARIES", startedAt: null, finishedAt: null, repechageFinalizedAt: null } });
   }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
 }
 
