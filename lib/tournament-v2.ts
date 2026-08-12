@@ -1,13 +1,12 @@
 import { Prisma } from "../app/generated/prisma/client";
 import { prisma } from "./db";
+import { assertBocceScore, availableFields, bracketSize, firstRoundSlots } from "./bracket";
 
-const FIELDS = 2;
 export const PUBLIC_INCLUDE = {
   matches: { orderBy: [{ round: "asc" as const }, { position: "asc" as const }], include: { teamA: true, teamB: true, winner: true } },
   teams: { orderBy: { name: "asc" as const } },
 };
 
-const nextPowerOfTwo = (value: number) => 2 ** Math.ceil(Math.log2(value));
 const displayName = (team: { name: string; playerOne?: string | null; playerTwo?: string | null }) => team.playerOne && team.playerTwo ? `${team.playerOne} / ${team.playerTwo}` : team.name;
 
 export async function getTournament() {
@@ -70,19 +69,20 @@ async function advanceByes(tx: any, tournamentId: string) {
 }
 
 async function schedule(tx: any, tournamentId: string) {
-  const live = await tx.match.count({ where: { tournamentId, status: "LIVE" } });
-  const open = await tx.match.findMany({ where: { tournamentId, status: "SCHEDULED", teamAId: { not: null }, teamBId: { not: null } }, orderBy: [{ round: "asc" }, { position: "asc" }], take: Math.max(0, FIELDS - live) });
-  for (const [index, match] of open.entries()) await tx.match.update({ where: { id: match.id }, data: { status: "LIVE", field: live + index + 1, startedAt: new Date() } });
+  const live = await tx.match.findMany({ where: { tournamentId, status: "LIVE" }, select: { field: true } });
+  const available = availableFields(live.map((match: any) => match.field));
+  const open = await tx.match.findMany({ where: { tournamentId, status: "SCHEDULED", teamAId: { not: null }, teamBId: { not: null } }, orderBy: [{ round: "asc" }, { position: "asc" }], take: available.length });
+  for (const [index, match] of open.entries()) await tx.match.update({ where: { id: match.id }, data: { status: "LIVE", field: available[index], startedAt: new Date() } });
 }
 
 export async function generateDraw(tournamentId: string, drawMode: "PRELIMINARIES" | "REPECHAGE" = "PRELIMINARIES") {
   const teams = await prisma.team.findMany({ where: { tournamentId } });
-  if (teams.length < 2) throw Error("Servono almeno 2 coppie");
-  const size = nextPowerOfTwo(teams.length);
-  const slots = [...shuffle(teams), ...Array(size - teams.length).fill(null)];
+  const size = bracketSize(teams.length);
+  const slots = firstRoundSlots(shuffle(teams));
   return prisma.$transaction(async tx => {
     const tournament = await tx.tournament.findUnique({ where: { id: tournamentId } });
     if (!tournament) throw Error("Torneo non trovato");
+    if (tournament.status !== "SETUP") throw Error("Il sorteggio è consentito solo durante la configurazione");
     await tx.match.deleteMany({ where: { tournamentId } });
     for (let round = 1; round <= Math.log2(size); round++) for (let position = 0; position < size / 2 ** round; position++) await tx.match.create({ data: { tournamentId, round, position, teamAId: round === 1 ? slots[position * 2]?.id ?? null : null, teamBId: round === 1 ? slots[position * 2 + 1]?.id ?? null : null } });
     if (drawMode === "PRELIMINARIES") await advanceByes(tx, tournamentId);
@@ -99,9 +99,7 @@ export async function startTournament(tournamentId: string) {
   }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
 }
 
-function validScore(a: number, b: number) {
-  if (!Number.isInteger(a) || !Number.isInteger(b) || a < 0 || b < 0 || a > 14 || b > 14 || a === b || Math.max(a, b) < 11) throw Error("Il vincitore deve avere da 11 a 14 punti; pareggi non ammessi");
-}
+const validScore = assertBocceScore;
 
 export async function submitResult(tournamentId: string, matchId: string, scoreA: number, scoreB: number) {
   validScore(scoreA, scoreB);
@@ -137,7 +135,17 @@ export async function assignRepechage(tournamentId: string, teamId: string, matc
   }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
 }
 
-export async function resetTournament(tournamentId: string) { return prisma.$transaction(async tx => { await tx.match.deleteMany({ where: { tournamentId } }); return tx.tournament.update({ where: { id: tournamentId }, data: { status: "SETUP", startedAt: null, finishedAt: null } }); }); }
+export async function resetTournament(tournamentId: string) {
+  return prisma.$transaction(async tx => {
+    const tournament = await tx.tournament.findUnique({ where: { id: tournamentId } });
+    if (!tournament) throw Error("Torneo non trovato");
+    if (tournament.status === "LIVE" || tournament.status === "FINISHED" || tournament.startedAt) {
+      throw Error("Il torneo ufficiale è già iniziato e non può essere azzerato");
+    }
+    await tx.match.deleteMany({ where: { tournamentId } });
+    return tx.tournament.update({ where: { id: tournamentId }, data: { status: "SETUP", startedAt: null, finishedAt: null } });
+  }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+}
 
 export async function finalizeRepechage(tournamentId: string) {
   return prisma.$transaction(async tx => {

@@ -3,11 +3,20 @@ import { PrismaPg } from "@prisma/adapter-pg";
 
 const globalForPrisma = globalThis as unknown as { prisma?: PrismaClient };
 
+function secureConnectionString(value: string) {
+  const url = new URL(value);
+  const sslMode = url.searchParams.get("sslmode");
+  if (sslMode === "prefer" || sslMode === "require" || sslMode === "verify-ca") {
+    url.searchParams.set("sslmode", "verify-full");
+  }
+  return url.toString();
+}
+
 function makeClient() {
   const connectionString = process.env.DATABASE_URL ?? process.env.garadiboccerapone_DATABASE_URL;
   if (!connectionString) throw new Error("DATABASE_URL mancante");
   const adapter = new PrismaPg({
-    connectionString,
+    connectionString: secureConnectionString(connectionString),
     max: 3,
     connectionTimeoutMillis: 5000,
     idleTimeoutMillis: 10000,
