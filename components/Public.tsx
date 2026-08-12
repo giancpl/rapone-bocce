@@ -66,7 +66,7 @@ export default function Public({ initial, preview = false }: { initial: Tourname
   };
 
   if (!tournament) {
-    return <main className="landing"><div className="landingCard"><Brand /><p className="kicker">51° edizione</p><h1>Torneo di Bocce<br />in preparazione.</h1><p>Le iscrizioni e il tabellone saranno disponibili qui a breve.</p>{error && <p className="softError">{error}</p>}</div></main>;
+    return <main className="landing"><div className="landingCard"><Brand /><Countdown /><p className="kicker">51° edizione</p><h1>Torneo di Bocce<br />in preparazione.</h1><p>Le iscrizioni e il tabellone saranno disponibili qui a breve.</p>{error && <p className="softError">{error}</p>}</div></main>;
   }
 
   if (tournament.status === "SETUP") {

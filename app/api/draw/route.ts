@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { assignRepechage, finalizeRepechage, generateDraw, getTournament, resetTournament } from "../../../lib/tournament-v2";
+import { assignRepechage, finalizeRepechage, generateDraw, getTournament, resetTournament, unassignRepechage } from "../../../lib/tournament-v2";
 import { requireAdmin } from "../../../lib/auth";
 
 function mode(value: unknown) { return value === "REPECHAGE" ? "REPECHAGE" : "PRELIMINARIES" as const; }
@@ -23,6 +23,7 @@ export async function PATCH(request: Request) {
     await requireAdmin(tournament.id);
     const body = await request.json().catch(() => ({}));
     if (body.action === "assign") await assignRepechage(tournament.id, String(body.teamId || ""), String(body.matchId || ""));
+    else if (body.action === "unassign") await unassignRepechage(tournament.id, String(body.matchId || ""));
     else if (body.action === "finalize") await finalizeRepechage(tournament.id);
     else if (body.action === "reset") await resetTournament(tournament.id);
     else throw Error("Azione di ripescaggio non valida");

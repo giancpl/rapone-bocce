@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { assertBocceScore, availableFields, bracketSize, firstRoundSlots, MAX_TEAMS, nextMatchCoordinate } from "../lib/bracket.ts";
+import { assertBocceScore, availableFields, bracketSize, cascadeCoordinates, firstRoundSlots, MAX_TEAMS, nextMatchCoordinate, repechagePlan, shuffleItems } from "../lib/bracket.ts";
 
 test("every supported team count creates a traversable first round", () => {
   for (let count = 2; count <= MAX_TEAMS; count++) {
@@ -26,4 +26,26 @@ test("next slots and two-field scheduling remain deterministic", () => {
   assert.deepEqual(availableFields([1, null]), [2]);
   assert.deepEqual(availableFields([1, 2]), []);
   assert.deepEqual(availableFields([]), [1, 2]);
+});
+
+
+test("repechage plans select exactly the pairs needed to complete each bracket", () => {
+  assert.deepEqual(repechagePlan(10), { size: 16, preliminaryMatches: 2, byeSlots: 6, selections: 2 });
+  assert.deepEqual(repechagePlan(13), { size: 16, preliminaryMatches: 5, byeSlots: 3, selections: 3 });
+  assert.deepEqual(repechagePlan(7), { size: 8, preliminaryMatches: 3, byeSlots: 1, selections: 1 });
+  assert.deepEqual(repechagePlan(16), { size: 16, preliminaryMatches: 8, byeSlots: 0, selections: 0 });
+});
+
+test("draw shuffle keeps every pair and changes their order with a supplied random source", () => {
+  const teams = ["A", "B", "C", "D", "E"];
+  const shuffled = shuffleItems(teams, () => 0);
+  assert.deepEqual(teams, ["A", "B", "C", "D", "E"]);
+  assert.deepEqual([...shuffled].sort(), teams);
+  assert.notDeepEqual(shuffled, teams);
+});
+
+
+test("a result correction identifies only the dependent branch", () => {
+  assert.deepEqual(cascadeCoordinates(1, 0, 4), [{ round: 2, position: 0 }, { round: 3, position: 0 }, { round: 4, position: 0 }]);
+  assert.deepEqual(cascadeCoordinates(2, 3, 4), [{ round: 3, position: 1 }, { round: 4, position: 0 }]);
 });

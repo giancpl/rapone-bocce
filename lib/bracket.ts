@@ -44,3 +44,33 @@ export function availableFields(occupied: Array<number | null | undefined>, coun
 export function assertBocceScore(a: number, b: number) {
   if (!Number.isInteger(a) || !Number.isInteger(b) || a < 0 || b < 0 || a > 14 || b > 14 || a === b || Math.max(a, b) < 11) throw Error("Il vincitore deve avere da 11 a 14 punti; pareggi non ammessi");
 }
+
+
+export function shuffleItems<T>(items: T[], random: () => number = Math.random) {
+  const copy = [...items];
+  for (let index = copy.length - 1; index > 0; index--) {
+    const other = Math.floor(random() * (index + 1));
+    [copy[index], copy[other]] = [copy[other], copy[index]];
+  }
+  return copy;
+}
+
+export function repechagePlan(teamCount: number) {
+  const size = bracketSize(teamCount);
+  const preliminaryMatches = teamCount - size / 2;
+  const byeSlots = size - teamCount;
+  return { size, preliminaryMatches, byeSlots, selections: Math.min(preliminaryMatches, byeSlots) };
+}
+
+
+export function cascadeCoordinates(round: number, position: number, totalRounds: number) {
+  const cascade = [];
+  let currentRound = round, currentPosition = position;
+  while (currentRound < totalRounds) {
+    const next = nextMatchCoordinate(currentRound, currentPosition);
+    cascade.push({ round: next.round, position: next.position });
+    currentRound = next.round;
+    currentPosition = next.position;
+  }
+  return cascade;
+}

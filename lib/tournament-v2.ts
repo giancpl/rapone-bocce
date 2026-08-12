@@ -1,6 +1,6 @@
 import { Prisma } from "../app/generated/prisma/client";
 import { prisma } from "./db";
-import { assertBocceScore, availableFields, bracketSize, firstRoundSlots } from "./bracket";
+import { assertBocceScore, availableFields, bracketSize, cascadeCoordinates, firstRoundSlots, repechagePlan, shuffleItems } from "./bracket";
 
 export const PUBLIC_INCLUDE = {
   matches: { orderBy: [{ round: "asc" as const }, { position: "asc" as const }], include: { teamA: true, teamB: true, winner: true } },
@@ -18,18 +18,26 @@ export async function getTournament() {
 }
 
 function repechage(tournament: any) {
-  if (tournament.drawMode !== "REPECHAGE") return null;
-  const candidates = tournament.matches.filter((match: any) => match.round === 1 && match.status === "FINISHED" && match.teamA && match.teamB && match.winnerId).map((match: any) => {
+  if (tournament.drawMode !== "REPECHAGE" || tournament.repechageFinalizedAt) return null;
+  const plan = repechagePlan(tournament.teams.length);
+  if (!plan.selections) return null;
+  const firstRound = tournament.matches.filter((match: any) => match.round === 1);
+  const qualifying = firstRound.filter((match: any) => match.status === "FINISHED" && Math.max(match.scoreA, match.scoreB) >= 11 && match.teamA && match.teamB && match.winnerId);
+  const candidates = qualifying.map((match: any) => {
     const loser = match.winnerId === match.teamAId ? match.teamB : match.teamA;
     const scored = match.winnerId === match.teamAId ? match.scoreB : match.scoreA;
     const conceded = match.winnerId === match.teamAId ? match.scoreA : match.scoreB;
     return { id: loser.id, name: displayName(loser), difference: scored - conceded, scored, conceded };
   }).sort((a: any, b: any) => b.difference - a.difference || b.scored - a.scored || a.name.localeCompare(b.name));
-  const used = new Set(tournament.matches.filter((match: any) => match.status !== "FINISHED").flatMap((match: any) => [match.teamAId, match.teamBId]));
-  const slots = tournament.matches.filter((match: any) => match.round === 1 && match.status === "SCHEDULED" && Boolean(match.teamAId) !== Boolean(match.teamBId)).map((match: any) => ({ id: match.id, opponent: displayName(match.teamA ?? match.teamB) }));
-  return { candidates: candidates.filter((team: any) => !used.has(team.id)), slots };
+  const allQualifiersFinished = qualifying.length === plan.preliminaryMatches;
+  const used = new Set(firstRound.filter((match: any) => match.status === "SCHEDULED" && match.teamA && match.teamB).flatMap((match: any) => [match.teamAId, match.teamBId]));
+  const assignments = firstRound.filter((match: any) => match.status === "SCHEDULED" && match.teamA && match.teamB).map((match: any) => {
+    const selected = candidates.find((candidate: any) => candidate.id === match.teamAId || candidate.id === match.teamBId);
+    return selected ? { matchId: match.id, teamId: selected.id, team: selected.name, opponent: displayName(match.teamAId === selected.id ? match.teamB : match.teamA) } : null;
+  }).filter(Boolean);
+  const slots = firstRound.filter((match: any) => match.status === "SCHEDULED" && Boolean(match.teamAId) !== Boolean(match.teamBId)).map((match: any) => ({ id: match.id, opponent: displayName(match.teamA ?? match.teamB) }));
+  return { qualifying: { completed: qualifying.length, total: plan.preliminaryMatches }, selections: plan.selections, assigned: assignments.length, ready: allQualifiersFinished, candidates: candidates.filter((candidate: any) => !used.has(candidate.id)), slots, assignments };
 }
-
 export function publicTournament(tournament: any) {
   if (!tournament) return null;
   return {
@@ -39,8 +47,6 @@ export function publicTournament(tournament: any) {
     matches: tournament.matches.map((match: any) => ({ id: match.id, round: match.round, position: match.position, field: match.field, a: match.teamA ? displayName(match.teamA) : null, b: match.teamB ? displayName(match.teamB) : null, scoreA: match.scoreA, scoreB: match.scoreB, status: match.status, winner: match.winner ? displayName(match.winner) : null })),
   };
 }
-
-function shuffle<T>(items: T[]) { const copy = [...items]; for (let index = copy.length - 1; index > 0; index--) { const other = Math.floor(Math.random() * (index + 1)); [copy[index], copy[other]] = [copy[other], copy[index]]; } return copy; }
 
 async function advance(tx: any, tournamentId: string, round: number, position: number, winnerId: string) {
   const next = await tx.match.findUnique({ where: { tournamentId_round_position: { tournamentId, round: round + 1, position: Math.floor(position / 2) } } });
@@ -78,7 +84,7 @@ async function schedule(tx: any, tournamentId: string) {
 export async function generateDraw(tournamentId: string, drawMode: "PRELIMINARIES" | "REPECHAGE" = "PRELIMINARIES") {
   const teams = await prisma.team.findMany({ where: { tournamentId } });
   const size = bracketSize(teams.length);
-  const slots = firstRoundSlots(shuffle(teams));
+  const slots = firstRoundSlots(shuffleItems(teams));
   return prisma.$transaction(async tx => {
     const tournament = await tx.tournament.findUnique({ where: { id: tournamentId } });
     if (!tournament) throw Error("Torneo non trovato");
@@ -86,7 +92,7 @@ export async function generateDraw(tournamentId: string, drawMode: "PRELIMINARIE
     await tx.match.deleteMany({ where: { tournamentId } });
     for (let round = 1; round <= Math.log2(size); round++) for (let position = 0; position < size / 2 ** round; position++) await tx.match.create({ data: { tournamentId, round, position, teamAId: round === 1 ? slots[position * 2]?.id ?? null : null, teamBId: round === 1 ? slots[position * 2 + 1]?.id ?? null : null } });
     if (drawMode === "PRELIMINARIES") await advanceByes(tx, tournamentId);
-    return tx.tournament.update({ where: { id: tournamentId }, data: { status: "READY", drawMode, startedAt: null, finishedAt: null }, include: PUBLIC_INCLUDE });
+    return tx.tournament.update({ where: { id: tournamentId }, data: { status: "READY", drawMode, startedAt: null, finishedAt: null, repechageFinalizedAt: null }, include: PUBLIC_INCLUDE });
   }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
 }
 
@@ -122,16 +128,28 @@ export async function submitResult(tournamentId: string, matchId: string, scoreA
 
 export async function assignRepechage(tournamentId: string, teamId: string, matchId: string) {
   return prisma.$transaction(async tx => {
-    const tournament = await tx.tournament.findUnique({ where: { id: tournamentId } });
-    if (!tournament || tournament.drawMode !== "REPECHAGE" || tournament.status !== "LIVE") throw Error("Ripescaggi non disponibili");
-    const source = await tx.match.findFirst({ where: { tournamentId, round: 1, status: "FINISHED", winnerId: { not: null }, OR: [{ teamAId: teamId }, { teamBId: teamId }] } });
-    if (!source || source.winnerId === teamId) throw Error("La coppia non è ripescabile");
+    const tournament = await tx.tournament.findUnique({ where: { id: tournamentId }, include: PUBLIC_INCLUDE });
+    if (!tournament || tournament.drawMode !== "REPECHAGE" || tournament.status !== "LIVE" || tournament.repechageFinalizedAt) throw Error("Ripescaggi non disponibili");
+    const panel = repechage(tournament);
+    if (!panel?.ready) throw Error("Completa prima tutti i preliminari");
+    if (panel.assigned >= panel.selections) throw Error("Hai già selezionato tutte le coppie ripescate");
+    if (!panel.candidates.some((candidate: any) => candidate.id === teamId)) throw Error("La coppia non è selezionabile per il ripescaggio");
     const target = await tx.match.findFirst({ where: { id: matchId, tournamentId, round: 1, status: "SCHEDULED" } });
     if (!target || Boolean(target.teamAId) === Boolean(target.teamBId)) throw Error("Posto di ripescaggio non disponibile");
-    const occupied = await tx.match.count({ where: { tournamentId, status: { not: "FINISHED" }, OR: [{ teamAId: teamId }, { teamBId: teamId }] } });
-    if (occupied) throw Error("La coppia è già nel tabellone");
     await tx.match.update({ where: { id: target.id }, data: target.teamAId ? { teamBId: teamId } : { teamAId: teamId } });
-    await schedule(tx, tournamentId);
+  }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+}
+
+export async function unassignRepechage(tournamentId: string, matchId: string) {
+  return prisma.$transaction(async tx => {
+    const tournament = await tx.tournament.findUnique({ where: { id: tournamentId }, include: PUBLIC_INCLUDE });
+    if (!tournament || tournament.drawMode !== "REPECHAGE" || tournament.status !== "LIVE" || tournament.repechageFinalizedAt) throw Error("Ripescaggi non disponibili");
+    const panel = repechage(tournament);
+    const assignment = panel?.assignments.find((item: any) => item.matchId === matchId);
+    if (!assignment) throw Error("Ripescaggio non trovato");
+    const target = await tx.match.findFirst({ where: { id: matchId, tournamentId, round: 1, status: "SCHEDULED" } });
+    if (!target) throw Error("Posto di ripescaggio non disponibile");
+    await tx.match.update({ where: { id: target.id }, data: target.teamAId === assignment.teamId ? { teamAId: null } : { teamBId: null } });
   }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
 }
 
@@ -143,20 +161,24 @@ export async function resetTournament(tournamentId: string) {
       throw Error("Il torneo ufficiale è già iniziato e non può essere azzerato");
     }
     await tx.match.deleteMany({ where: { tournamentId } });
-    return tx.tournament.update({ where: { id: tournamentId }, data: { status: "SETUP", startedAt: null, finishedAt: null } });
+    return tx.tournament.update({ where: { id: tournamentId }, data: { status: "SETUP", startedAt: null, finishedAt: null, repechageFinalizedAt: null } });
   }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
 }
 
 export async function finalizeRepechage(tournamentId: string) {
   return prisma.$transaction(async tx => {
-    const tournament = await tx.tournament.findUnique({ where: { id: tournamentId } });
-    if (!tournament || tournament.drawMode !== "REPECHAGE" || tournament.status !== "LIVE") throw Error("Ripescaggi non disponibili");
+    const tournament = await tx.tournament.findUnique({ where: { id: tournamentId }, include: PUBLIC_INCLUDE });
+    if (!tournament || tournament.drawMode !== "REPECHAGE" || tournament.status !== "LIVE" || tournament.repechageFinalizedAt) throw Error("Ripescaggi non disponibili");
+    const panel = repechage(tournament);
+    if (!panel?.ready) throw Error("Completa prima tutti i preliminari");
+    if (panel.assigned !== panel.selections) throw Error("Seleziona esattamente " + panel.selections + " coppie da ripescare");
     await advanceByes(tx, tournamentId);
     await schedule(tx, tournamentId);
+    await tx.tournament.update({ where: { id: tournamentId }, data: { repechageFinalizedAt: new Date() } });
   }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
 }
 
 type CascadeMatch = { id: string; round: number; position: number; teamAId: string | null; teamBId: string | null; status: string };
-function cascadeFrom(matches: CascadeMatch[], match: CascadeMatch) { const cascade: CascadeMatch[] = []; let current = match; while (true) { const next = matches.find(item => item.round === current.round + 1 && item.position === Math.floor(current.position / 2)); if (!next) return cascade; cascade.push(next); current = next; } }
+function cascadeFrom(matches: CascadeMatch[], match: CascadeMatch) { const lastRound = Math.max(...matches.map(item => item.round)); return cascadeCoordinates(match.round, match.position, lastRound).map(coordinate => matches.find(item => item.round === coordinate.round && item.position === coordinate.position)).filter((item): item is CascadeMatch => Boolean(item)); }
 export async function previewCorrection(tournamentId: string, matchId: string, scoreA: number, scoreB: number) { validScore(scoreA, scoreB); const matches = await prisma.match.findMany({ where: { tournamentId }, orderBy: [{ round: "asc" }, { position: "asc" }] }); const match = matches.find(item => item.id === matchId); if (!match || match.status !== "FINISHED" || !match.teamAId || !match.teamBId) throw Error("Risultato non modificabile"); const winnerId = scoreA > scoreB ? match.teamAId : match.teamBId; const cascade = winnerId !== match.winnerId ? cascadeFrom(matches, match) : []; return { changesWinner: winnerId !== match.winnerId, affected: cascade.map(item => ({ id: item.id, round: item.round, position: item.position, status: item.status })) }; }
 export async function correctResult(tournamentId: string, matchId: string, scoreA: number, scoreB: number, confirmCascade = false) { const preview = await previewCorrection(tournamentId, matchId, scoreA, scoreB); if (preview.affected.length && !confirmCascade) throw Error("Conferma necessaria per riaprire gli incontri successivi"); return prisma.$transaction(async tx => { const matches = await tx.match.findMany({ where: { tournamentId }, orderBy: [{ round: "asc" }, { position: "asc" }] }); const match = matches.find(item => item.id === matchId); if (!match || match.status !== "FINISHED" || !match.teamAId || !match.teamBId) throw Error("Risultato non modificabile"); const winnerId = scoreA > scoreB ? match.teamAId : match.teamBId; const cascade = winnerId !== match.winnerId ? cascadeFrom(matches, match) : []; await tx.match.update({ where: { id: match.id }, data: { scoreA, scoreB, winnerId } }); if (cascade.length) { for (const item of cascade) await tx.match.update({ where: { id: item.id }, data: { status: "SCHEDULED", field: null, scoreA: 0, scoreB: 0, winnerId: null, startedAt: null, finishedAt: null } }); for (const [index, item] of cascade.entries()) { const previous = index === 0 ? match : cascade[index - 1]; const slot = previous.position % 2 === 0 ? "teamAId" : "teamBId"; await tx.match.update({ where: { id: item.id }, data: { [slot]: index === 0 ? winnerId : null } }); } await schedule(tx, tournamentId); } await tx.tournament.update({ where: { id: tournamentId }, data: { status: cascade.length ? "LIVE" : undefined, finishedAt: cascade.length ? null : undefined } }); return { affected: cascade.map(item => item.id) }; }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }); }

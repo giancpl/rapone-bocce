@@ -43,6 +43,7 @@ model Tournament {
   adminPasswordHash String
   startedAt         DateTime?
   finishedAt        DateTime?
+  repechageFinalizedAt DateTime?
   createdAt         DateTime         @default(now())
   updatedAt         DateTime         @updatedAt
   teams             Team[]
