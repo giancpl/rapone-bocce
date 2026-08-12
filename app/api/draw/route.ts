@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { assignRepechage, finalizeRepechage, generateDraw, getTournamentSummary, resetTournament, unassignRepechage } from "../../../lib/tournament-v2";
+import { generateDraw, getTournamentSummary, resetTournament } from "../../../lib/tournament-v2";
 import { confirmAdminPassword, requireAdmin } from "../../../lib/auth";
 
 function mode(value: unknown) { return value === "REPECHAGE" ? "REPECHAGE" : "PRELIMINARIES" as const; }
@@ -22,15 +22,12 @@ export async function PATCH(request: Request) {
     if (!tournament) throw Error("Torneo non trovato");
     await requireAdmin(tournament.id);
     const body = await request.json().catch(() => ({}));
-    if (body.action === "assign") await assignRepechage(tournament.id, String(body.teamId || ""), String(body.matchId || ""));
-    else if (body.action === "unassign") await unassignRepechage(tournament.id, String(body.matchId || ""));
-    else if (body.action === "finalize") await finalizeRepechage(tournament.id);
-    else if (body.action === "reset") {
+    if (body.action === "reset") {
       if (body.confirmation !== "RESETTA TORNEO") throw Error("Conferma reset non valida");
       if (!(await confirmAdminPassword(tournament.id, body.password))) throw Error("Password non valida");
       await resetTournament(tournament.id);
     }
-    else throw Error("Azione di ripescaggio non valida");
+    else throw Error("Azione non valida");
     return NextResponse.json({ ok: true });
   } catch (error: any) { return failure(error); }
 }

@@ -1,6 +1,6 @@
 import { Prisma } from "../app/generated/prisma/client";
 import { prisma } from "./db";
-import { assertBocceScore, bracketSize, cascadeCoordinates, firstRoundSlots, repechagePlan, shuffleItems } from "./bracket";
+import { assertBocceScore, bracketSize, cascadeCoordinates, firstRoundSlots, repechageCutoff, repechagePlan, repechagePlayoffWave, shuffleItems } from "./bracket";
 
 export const PUBLIC_INCLUDE = {
   matches: { orderBy: [{ round: "asc" as const }, { position: "asc" as const }], include: { teamA: true, teamB: true, winner: true } },
@@ -15,10 +15,26 @@ export async function getTournamentSummary() {
 
 export async function getTournament() {
   const tournament = await prisma.tournament.findFirst({ orderBy: { createdAt: "desc" }, include: PUBLIC_INCLUDE });
+  if (tournament?.status === "LIVE" && tournament.drawMode === "REPECHAGE" && !tournament.repechageFinalizedAt) {
+    const panel = repechage(tournament);
+    if (panel?.ready && !panel.playoffs.some((match: any) => match.status !== "FINISHED")) {
+      try { await ensureAutomaticRepechage(tournament.id); } catch (error: any) { if (!["P2002", "P2034"].includes(error?.code)) throw error; }
+      return prisma.tournament.findUnique({ where: { id: tournament.id }, include: PUBLIC_INCLUDE });
+    }
+  }
   if (tournament?.status === "LIVE" && tournament.teams.length >= 2 && tournament.matches.length > 0 && tournament.matches.every(match => match.status === "FINISHED")) {
     return prisma.tournament.update({ where: { id: tournament.id }, data: { status: "FINISHED", finishedAt: tournament.finishedAt ?? new Date() }, include: PUBLIC_INCLUDE });
   }
   return tournament;
+}
+
+function defeatedCandidates(tournament: any) {
+  return tournament.matches.filter((match: any) => match.round === 1 && match.status === "FINISHED" && Math.max(match.scoreA, match.scoreB) >= 11 && match.teamA && match.teamB && match.winnerId).map((match: any) => {
+    const loser = match.winnerId === match.teamAId ? match.teamB : match.teamA;
+    const scored = match.winnerId === match.teamAId ? match.scoreB : match.scoreA;
+    const conceded = match.winnerId === match.teamAId ? match.scoreA : match.scoreB;
+    return { id: loser.id, name: displayName(loser), difference: scored - conceded, scored, conceded };
+  }).sort((a: any, b: any) => b.difference - a.difference || b.scored - a.scored || a.name.localeCompare(b.name));
 }
 
 function repechage(tournament: any) {
@@ -27,12 +43,7 @@ function repechage(tournament: any) {
   if (!plan.selections) return null;
   const firstRound = tournament.matches.filter((match: any) => match.round === 1);
   const qualifying = firstRound.filter((match: any) => match.status === "FINISHED" && Math.max(match.scoreA, match.scoreB) >= 11 && match.teamA && match.teamB && match.winnerId);
-  const candidates = qualifying.map((match: any) => {
-    const loser = match.winnerId === match.teamAId ? match.teamB : match.teamA;
-    const scored = match.winnerId === match.teamAId ? match.scoreB : match.scoreA;
-    const conceded = match.winnerId === match.teamAId ? match.scoreA : match.scoreB;
-    return { id: loser.id, name: displayName(loser), difference: scored - conceded, scored, conceded };
-  }).sort((a: any, b: any) => b.difference - a.difference || b.scored - a.scored || a.name.localeCompare(b.name));
+  const candidates = defeatedCandidates(tournament);
   const allQualifiersFinished = qualifying.length === plan.preliminaryMatches;
   const used = new Set(firstRound.filter((match: any) => match.status === "SCHEDULED" && match.teamA && match.teamB).flatMap((match: any) => [match.teamAId, match.teamBId]));
   const assignments = firstRound.filter((match: any) => match.status === "SCHEDULED" && match.teamA && match.teamB).map((match: any) => {
@@ -40,7 +51,9 @@ function repechage(tournament: any) {
     return selected ? { matchId: match.id, teamId: selected.id, team: selected.name, opponent: displayName(match.teamAId === selected.id ? match.teamB : match.teamA) } : null;
   }).filter(Boolean);
   const slots = firstRound.filter((match: any) => match.status === "SCHEDULED" && Boolean(match.teamAId) !== Boolean(match.teamBId)).map((match: any) => ({ id: match.id, opponent: displayName(match.teamA ?? match.teamB) }));
-  return { qualifying: { completed: qualifying.length, total: plan.preliminaryMatches }, selections: plan.selections, assigned: assignments.length, ready: allQualifiersFinished, candidates: candidates.filter((candidate: any) => !used.has(candidate.id)), slots, assignments };
+  const playoffs = tournament.matches.filter((match: any) => match.round === 0).map((match: any) => ({ id: match.id, a: match.teamA ? displayName(match.teamA) : null, b: match.teamB ? displayName(match.teamB) : null, status: match.status, winner: match.winner ? displayName(match.winner) : null }));
+  const cutoff = allQualifiersFinished ? repechageCutoff(candidates, plan.selections) : null;
+  return { automatic: true, qualifying: { completed: qualifying.length, total: plan.preliminaryMatches }, selections: plan.selections, assigned: assignments.length, ready: allQualifiersFinished, needsPlayoff: Boolean(cutoff?.needsPlayoff), guaranteed: cutoff?.guaranteed.map((team: any) => team.name) ?? [], candidates: candidates.filter((candidate: any) => !used.has(candidate.id)), slots, assignments, playoffs };
 }
 export function publicTournament(tournament: any) {
   if (!tournament) return null;
@@ -81,6 +94,53 @@ async function advanceByes(tx: any, tournamentId: string) {
 async function schedule(tx: any, tournamentId: string) {
   // La coda resta esplicita: solo l'organizzatore chiama le coppie e le porta in campo.
   await tx.match.updateMany({ where: { tournamentId, status: "SCHEDULED", teamAId: { not: null }, teamBId: { not: null } }, data: { status: "READY", field: null } });
+}
+
+async function progressAutomaticRepechage(tx: any, tournamentId: string) {
+  const tournament = await tx.tournament.findUnique({ where: { id: tournamentId }, include: PUBLIC_INCLUDE });
+  if (!tournament || tournament.drawMode !== "REPECHAGE" || tournament.repechageFinalizedAt || tournament.teams.length < 2) return;
+  const plan = repechagePlan(tournament.teams.length);
+  if (!plan.selections) { await advanceByes(tx, tournamentId); await tx.tournament.update({ where: { id: tournamentId }, data: { repechageFinalizedAt: new Date() } }); return; }
+  const candidates = defeatedCandidates(tournament);
+  if (candidates.length !== plan.preliminaryMatches) return;
+  const cutoff = repechageCutoff(candidates, plan.selections);
+  let qualifiers: any[];
+  if (cutoff.needsPlayoff) {
+    const playoffs = tournament.matches.filter((match: any) => match.round === 0);
+    const unfinished = playoffs.filter((match: any) => match.status !== "FINISHED");
+    const eliminated = new Set(playoffs.filter((match: any) => match.status === "FINISHED" && match.winnerId).map((match: any) => match.winnerId === match.teamAId ? match.teamBId : match.teamAId));
+    const survivors = cutoff.tied.filter((candidate: any) => !eliminated.has(candidate.id));
+    if (unfinished.length) return;
+    if (survivors.length > cutoff.remaining) {
+      const pairs = repechagePlayoffWave(survivors, cutoff.remaining);
+      const nextPosition = playoffs.reduce((max: number, match: any) => Math.max(max, match.position + 1), 0);
+      for (const [index, pair] of pairs.entries()) await tx.match.create({ data: { tournamentId, round: 0, position: nextPosition + index, teamAId: pair[0].id, teamBId: pair[1].id } });
+      await schedule(tx, tournamentId);
+      return;
+    }
+    qualifiers = [...cutoff.guaranteed, ...survivors];
+  } else qualifiers = cutoff.ranked.slice(0, plan.selections);
+  if (qualifiers.length !== plan.selections) throw Error("Impossibile completare i ripescaggi automatici");
+  const candidateIds = new Set(candidates.map((candidate: any) => candidate.id));
+  const targets = tournament.matches.filter((match: any) => match.round === 1 && match.status !== "FINISHED").filter((match: any) => [match.teamAId, match.teamBId].filter((id: any) => id && !candidateIds.has(id)).length === 1).sort((a: any, b: any) => a.position - b.position);
+  if (targets.length < qualifiers.length) throw Error("Posti di ripescaggio non disponibili");
+  for (const target of targets) {
+    const baseA = target.teamAId && !candidateIds.has(target.teamAId) ? target.teamAId : null;
+    const baseB = target.teamBId && !candidateIds.has(target.teamBId) ? target.teamBId : null;
+    await tx.match.update({ where: { id: target.id }, data: { teamAId: baseA, teamBId: baseB, status: "SCHEDULED", scoreA: 0, scoreB: 0, winnerId: null, startedAt: null, finishedAt: null } });
+  }
+  for (const [index, qualifier] of qualifiers.entries()) {
+    const target = targets[index];
+    await tx.match.update({ where: { id: target.id }, data: target.teamAId && !candidateIds.has(target.teamAId) ? { teamBId: qualifier.id } : { teamAId: qualifier.id } });
+  }
+  await advanceByes(tx, tournamentId);
+  await schedule(tx, tournamentId);
+  await tx.tournament.update({ where: { id: tournamentId }, data: { repechageFinalizedAt: new Date() } });
+}
+
+
+export async function ensureAutomaticRepechage(tournamentId: string) {
+  return prisma.$transaction(async tx => progressAutomaticRepechage(tx, tournamentId), { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
 }
 
 export async function generateDraw(tournamentId: string, drawMode: "PRELIMINARIES" | "REPECHAGE" = "PRELIMINARIES", rebuild = false) {
@@ -150,39 +210,13 @@ export async function submitResult(tournamentId: string, matchId: string, scoreA
     const winnerId = scoreA > scoreB ? match.teamAId : match.teamBId;
     if (!winnerId) throw Error("Coppia vincente non valida");
     const result = await tx.match.update({ where: { id: match.id }, data: { scoreA, scoreB, winnerId, status: "FINISHED", field: null, finishedAt: new Date() } });
-    await advance(tx, tournamentId, match.round, match.position, winnerId);
+    if (match.round > 0) await advance(tx, tournamentId, match.round, match.position, winnerId);
     if (tournament.drawMode === "PRELIMINARIES") await advanceByes(tx, tournamentId);
+    if (tournament.drawMode === "REPECHAGE") await progressAutomaticRepechage(tx, tournamentId);
     await schedule(tx, tournamentId);
     const unfinished = await tx.match.count({ where: { tournamentId, status: { not: "FINISHED" } } });
     await tx.tournament.update({ where: { id: tournamentId }, data: unfinished ? {} : { status: "FINISHED", finishedAt: new Date() } });
     return result;
-  }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
-}
-
-export async function assignRepechage(tournamentId: string, teamId: string, matchId: string) {
-  return prisma.$transaction(async tx => {
-    const tournament = await tx.tournament.findUnique({ where: { id: tournamentId }, include: PUBLIC_INCLUDE });
-    if (!tournament || tournament.drawMode !== "REPECHAGE" || tournament.status !== "LIVE" || tournament.repechageFinalizedAt) throw Error("Ripescaggi non disponibili");
-    const panel = repechage(tournament);
-    if (!panel?.ready) throw Error("Completa prima tutti i preliminari");
-    if (panel.assigned >= panel.selections) throw Error("Hai già selezionato tutte le coppie ripescate");
-    if (!panel.candidates.some((candidate: any) => candidate.id === teamId)) throw Error("La coppia non è selezionabile per il ripescaggio");
-    const target = await tx.match.findFirst({ where: { id: matchId, tournamentId, round: 1, status: "SCHEDULED" } });
-    if (!target || Boolean(target.teamAId) === Boolean(target.teamBId)) throw Error("Posto di ripescaggio non disponibile");
-    await tx.match.update({ where: { id: target.id }, data: target.teamAId ? { teamBId: teamId } : { teamAId: teamId } });
-  }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
-}
-
-export async function unassignRepechage(tournamentId: string, matchId: string) {
-  return prisma.$transaction(async tx => {
-    const tournament = await tx.tournament.findUnique({ where: { id: tournamentId }, include: PUBLIC_INCLUDE });
-    if (!tournament || tournament.drawMode !== "REPECHAGE" || tournament.status !== "LIVE" || tournament.repechageFinalizedAt) throw Error("Ripescaggi non disponibili");
-    const panel = repechage(tournament);
-    const assignment = panel?.assignments.find((item: any) => item.matchId === matchId);
-    if (!assignment) throw Error("Ripescaggio non trovato");
-    const target = await tx.match.findFirst({ where: { id: matchId, tournamentId, round: 1, status: "SCHEDULED" } });
-    if (!target) throw Error("Posto di ripescaggio non disponibile");
-    await tx.match.update({ where: { id: target.id }, data: target.teamAId === assignment.teamId ? { teamAId: null } : { teamBId: null } });
   }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
 }
 
@@ -197,20 +231,108 @@ export async function resetTournament(tournamentId: string) {
   }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
 }
 
-export async function finalizeRepechage(tournamentId: string) {
-  return prisma.$transaction(async tx => {
-    const tournament = await tx.tournament.findUnique({ where: { id: tournamentId }, include: PUBLIC_INCLUDE });
-    if (!tournament || tournament.drawMode !== "REPECHAGE" || tournament.status !== "LIVE" || tournament.repechageFinalizedAt) throw Error("Ripescaggi non disponibili");
-    const panel = repechage(tournament);
-    if (!panel?.ready) throw Error("Completa prima tutti i preliminari");
-    if (panel.assigned !== panel.selections) throw Error("Seleziona esattamente " + panel.selections + " coppie da ripescare");
-    await advanceByes(tx, tournamentId);
-    await schedule(tx, tournamentId);
-    await tx.tournament.update({ where: { id: tournamentId }, data: { repechageFinalizedAt: new Date() } });
-  }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+type CascadeMatch = { id: string; round: number; position: number; teamAId: string | null; teamBId: string | null; status: string };
+function cascadeFrom(matches: CascadeMatch[], match: CascadeMatch) {
+  const lastRound = Math.max(...matches.map(item => item.round));
+  return cascadeCoordinates(match.round, match.position, lastRound)
+    .map(coordinate => matches.find(item => item.round === coordinate.round && item.position === coordinate.position))
+    .filter((item): item is CascadeMatch => Boolean(item));
 }
 
-type CascadeMatch = { id: string; round: number; position: number; teamAId: string | null; teamBId: string | null; status: string };
-function cascadeFrom(matches: CascadeMatch[], match: CascadeMatch) { const lastRound = Math.max(...matches.map(item => item.round)); return cascadeCoordinates(match.round, match.position, lastRound).map(coordinate => matches.find(item => item.round === coordinate.round && item.position === coordinate.position)).filter((item): item is CascadeMatch => Boolean(item)); }
-export async function previewCorrection(tournamentId: string, matchId: string, scoreA: number, scoreB: number) { validScore(scoreA, scoreB); const matches = await prisma.match.findMany({ where: { tournamentId }, orderBy: [{ round: "asc" }, { position: "asc" }] }); const match = matches.find(item => item.id === matchId); if (!match || match.status !== "FINISHED" || !match.teamAId || !match.teamBId) throw Error("Risultato non modificabile"); const winnerId = scoreA > scoreB ? match.teamAId : match.teamBId; const cascade = winnerId !== match.winnerId ? cascadeFrom(matches, match) : []; return { changesWinner: winnerId !== match.winnerId, affected: cascade.map(item => ({ id: item.id, round: item.round, position: item.position, status: item.status })) }; }
-export async function correctResult(tournamentId: string, matchId: string, scoreA: number, scoreB: number, confirmCascade = false) { const preview = await previewCorrection(tournamentId, matchId, scoreA, scoreB); if (preview.affected.length && !confirmCascade) throw Error("Conferma necessaria per riaprire gli incontri successivi"); return prisma.$transaction(async tx => { const matches = await tx.match.findMany({ where: { tournamentId }, orderBy: [{ round: "asc" }, { position: "asc" }] }); const match = matches.find(item => item.id === matchId); if (!match || match.status !== "FINISHED" || !match.teamAId || !match.teamBId) throw Error("Risultato non modificabile"); const winnerId = scoreA > scoreB ? match.teamAId : match.teamBId; const cascade = winnerId !== match.winnerId ? cascadeFrom(matches, match) : []; await tx.match.update({ where: { id: match.id }, data: { scoreA, scoreB, winnerId } }); if (cascade.length) { for (const item of cascade) await tx.match.update({ where: { id: item.id }, data: { status: "SCHEDULED", field: null, scoreA: 0, scoreB: 0, winnerId: null, startedAt: null, finishedAt: null } }); for (const [index, item] of cascade.entries()) { const previous = index === 0 ? match : cascade[index - 1]; const slot = previous.position % 2 === 0 ? "teamAId" : "teamBId"; await tx.match.update({ where: { id: item.id }, data: { [slot]: index === 0 ? winnerId : null } }); } await schedule(tx, tournamentId); } await tx.tournament.update({ where: { id: tournamentId }, data: { status: cascade.length ? "LIVE" : undefined, finishedAt: cascade.length ? null : undefined } }); return { affected: cascade.map(item => item.id) }; }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }); }
+function originalPreliminaries(tournament: any) {
+  const expected = repechagePlan(tournament.teams.length).preliminaryMatches;
+  const finalizedAt = tournament.repechageFinalizedAt ? new Date(tournament.repechageFinalizedAt).getTime() : null;
+  return tournament.matches
+    .filter((match: any) => match.round === 1 && match.status === "FINISHED" && match.teamAId && match.teamBId && match.winnerId)
+    .filter((match: any) => finalizedAt === null || match.finishedAt && new Date(match.finishedAt).getTime() <= finalizedAt)
+    .sort((a: any, b: any) => new Date(a.finishedAt ?? 0).getTime() - new Date(b.finishedAt ?? 0).getTime() || a.position - b.position)
+    .slice(0, expected);
+}
+
+function repechageCorrectionImpact(tournament: any, match: any, scoreA: number, scoreB: number) {
+  if (tournament.drawMode !== "REPECHAGE" || (match.scoreA === scoreA && match.scoreB === scoreB)) return null;
+  const originals = originalPreliminaries(tournament);
+  const originalIds = new Set(originals.map((item: any) => item.id));
+  if (match.round !== 0 && !originalIds.has(match.id)) return null;
+  const affected = tournament.matches.filter((item: any) =>
+    item.id !== match.id && (
+      item.round > 1 ||
+      item.round === 1 && !originalIds.has(item.id) ||
+      item.round === 0 && (match.round !== 0 || item.position > match.position)
+    )
+  );
+  return { originals, affected };
+}
+
+async function restartRepechageAfterCorrection(tx: any, tournament: any, source: any, scoreA: number, scoreB: number, winnerId: string, originals: any[]) {
+  const originalIds = new Set(originals.map(match => match.id));
+  const oldCandidateIds = new Set(originals.map(match => match.winnerId === match.teamAId ? match.teamBId : match.teamAId).filter(Boolean));
+
+  await tx.tournament.update({ where: { id: tournament.id }, data: { status: "LIVE", finishedAt: null, repechageFinalizedAt: null } });
+  if (source.round === 0) await tx.match.deleteMany({ where: { tournamentId: tournament.id, round: 0, position: { gt: source.position } } });
+  else await tx.match.deleteMany({ where: { tournamentId: tournament.id, round: 0 } });
+
+  for (const match of tournament.matches.filter((item: any) => item.round === 1 && !originalIds.has(item.id))) {
+    const teamAId = match.teamAId && !oldCandidateIds.has(match.teamAId) ? match.teamAId : null;
+    const teamBId = match.teamBId && !oldCandidateIds.has(match.teamBId) ? match.teamBId : null;
+    await tx.match.update({ where: { id: match.id }, data: { teamAId, teamBId, status: "SCHEDULED", field: null, scoreA: 0, scoreB: 0, winnerId: null, startedAt: null, finishedAt: null } });
+  }
+
+  await tx.match.updateMany({
+    where: { tournamentId: tournament.id, round: { gt: 1 } },
+    data: { teamAId: null, teamBId: null, status: "SCHEDULED", field: null, scoreA: 0, scoreB: 0, winnerId: null, startedAt: null, finishedAt: null }
+  });
+  await tx.match.update({ where: { id: source.id }, data: { scoreA, scoreB, winnerId, status: "FINISHED", field: null, finishedAt: source.finishedAt ?? new Date() } });
+
+  for (const match of originals) {
+    const originalWinner = match.id === source.id ? winnerId : match.winnerId;
+    if (originalWinner) await advance(tx, tournament.id, match.round, match.position, originalWinner);
+  }
+  await progressAutomaticRepechage(tx, tournament.id);
+  await schedule(tx, tournament.id);
+}
+
+export async function previewCorrection(tournamentId: string, matchId: string, scoreA: number, scoreB: number) {
+  validScore(scoreA, scoreB);
+  const tournament = await prisma.tournament.findUnique({ where: { id: tournamentId }, include: PUBLIC_INCLUDE });
+  const match = tournament?.matches.find(item => item.id === matchId);
+  if (!tournament || !match || match.status !== "FINISHED" || !match.teamAId || !match.teamBId) throw Error("Risultato non modificabile");
+  const winnerId = scoreA > scoreB ? match.teamAId : match.teamBId;
+  const repechageImpact = repechageCorrectionImpact(tournament, match, scoreA, scoreB);
+  const cascade = repechageImpact ? repechageImpact.affected : winnerId !== match.winnerId ? cascadeFrom(tournament.matches, match) : [];
+  return {
+    changesWinner: winnerId !== match.winnerId,
+    restartsRepechage: Boolean(repechageImpact),
+    affected: cascade.map((item: any) => ({ id: item.id, round: item.round, position: item.position, status: item.status }))
+  };
+}
+
+export async function correctResult(tournamentId: string, matchId: string, scoreA: number, scoreB: number, confirmCascade = false) {
+  validScore(scoreA, scoreB);
+  return prisma.$transaction(async tx => {
+    const tournament = await tx.tournament.findUnique({ where: { id: tournamentId }, include: PUBLIC_INCLUDE });
+    const match = tournament?.matches.find(item => item.id === matchId);
+    if (!tournament || !match || match.status !== "FINISHED" || !match.teamAId || !match.teamBId) throw Error("Risultato non modificabile");
+    const winnerId = scoreA > scoreB ? match.teamAId : match.teamBId;
+    const repechageImpact = repechageCorrectionImpact(tournament, match, scoreA, scoreB);
+    const cascade = repechageImpact ? repechageImpact.affected : winnerId !== match.winnerId ? cascadeFrom(tournament.matches, match) : [];
+    if (cascade.length && !confirmCascade) throw Error("Conferma necessaria per riaprire gli incontri successivi");
+
+    if (repechageImpact) {
+      await restartRepechageAfterCorrection(tx, tournament, match, scoreA, scoreB, winnerId, repechageImpact.originals);
+    } else {
+      await tx.match.update({ where: { id: match.id }, data: { scoreA, scoreB, winnerId } });
+      if (cascade.length) {
+        for (const item of cascade) await tx.match.update({ where: { id: item.id }, data: { status: "SCHEDULED", field: null, scoreA: 0, scoreB: 0, winnerId: null, startedAt: null, finishedAt: null } });
+        for (const [index, item] of cascade.entries()) {
+          const previous = index === 0 ? match : cascade[index - 1];
+          const slot = previous.position % 2 === 0 ? "teamAId" : "teamBId";
+          await tx.match.update({ where: { id: item.id }, data: { [slot]: index === 0 ? winnerId : null } });
+        }
+        await schedule(tx, tournamentId);
+      }
+      await tx.tournament.update({ where: { id: tournamentId }, data: { status: cascade.length ? "LIVE" : undefined, finishedAt: cascade.length ? null : undefined } });
+    }
+    return { affected: cascade.map((item: any) => item.id) };
+  }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+}

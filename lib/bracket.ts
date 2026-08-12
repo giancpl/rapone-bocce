@@ -63,6 +63,27 @@ export function repechagePlan(teamCount: number) {
 }
 
 
+export type RepechageCandidate = { id: string; difference: number; scored: number };
+
+export function repechageCutoff<T extends RepechageCandidate>(candidates: T[], selections: number) {
+  const ranked = [...candidates].sort((a, b) => b.difference - a.difference || b.scored - a.scored || a.id.localeCompare(b.id));
+  if (!Number.isInteger(selections) || selections < 0 || selections > ranked.length) throw Error("Numero di ripescaggi non valido");
+  if (selections === 0) return { ranked, guaranteed: [] as T[], tied: [] as T[], remaining: 0, needsPlayoff: false };
+  const cutoff = ranked[selections - 1];
+  const better = (item: T) => item.difference > cutoff.difference || item.difference === cutoff.difference && item.scored > cutoff.scored;
+  const equal = (item: T) => item.difference === cutoff.difference && item.scored === cutoff.scored;
+  const guaranteed = ranked.filter(better), tied = ranked.filter(equal), remaining = selections - guaranteed.length;
+  return { ranked, guaranteed, tied, remaining, needsPlayoff: tied.length > remaining };
+}
+
+export function repechagePlayoffWave<T>(survivors: T[], qualifierCount: number, random: () => number = Math.random) {
+  if (!Number.isInteger(qualifierCount) || qualifierCount < 1 || qualifierCount >= survivors.length) throw Error("Spareggio non necessario");
+  const shuffled = shuffleItems(survivors, random);
+  const matchCount = Math.min(Math.floor(shuffled.length / 2), shuffled.length - qualifierCount);
+  return Array.from({ length: matchCount }, (_, index) => [shuffled[index * 2], shuffled[index * 2 + 1]] as [T, T]);
+}
+
+
 export function cascadeCoordinates(round: number, position: number, totalRounds: number) {
   const cascade = [];
   let currentRound = round, currentPosition = position;
