@@ -23,11 +23,17 @@ enum MatchStatus {
   FINISHED
 }
 
+enum DrawMode {
+  PRELIMINARIES
+  REPECHAGE
+}
+
 model Tournament {
   id                String           @id @default(cuid())
   name              String
   edition           String
   status            TournamentStatus @default(SETUP)
+  drawMode          DrawMode          @default(PRELIMINARIES)
   adminPasswordHash String
   startedAt         DateTime?
   finishedAt        DateTime?
@@ -43,6 +49,8 @@ model Team {
   id           String     @id @default(cuid())
   tournamentId String
   name         String
+  playerOne    String?
+  playerTwo    String?
   seed         Int?
   createdAt    DateTime   @default(now())
   tournament   Tournament @relation(fields: [tournamentId], references: [id], onDelete: Cascade)

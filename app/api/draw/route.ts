@@ -1,1 +1,31 @@
-import {NextResponse} from "next/server";import {getTournament,generateDraw} from "../../../lib/tournament-v2";import {requireAdmin} from "../../../lib/auth";export async function POST(){try{const t=await getTournament();if(!t)throw Error("Torneo non trovato");await requireAdmin(t.id);await generateDraw(t.id);return NextResponse.json({ok:true})}catch(e:any){return NextResponse.json({error:e.message},{status:e.message==="NON_AUTORIZZATO"?401:400})}}
+import { NextResponse } from "next/server";
+import { assignRepechage, finalizeRepechage, generateDraw, getTournament, resetTournament } from "../../../lib/tournament-v2";
+import { requireAdmin } from "../../../lib/auth";
+
+function mode(value: unknown) { return value === "REPECHAGE" ? "REPECHAGE" : "PRELIMINARIES" as const; }
+function failure(error: any) { const message = error?.message || "Errore"; return NextResponse.json({ error: message }, { status: message === "NON_AUTORIZZATO" ? 401 : 400 }); }
+
+export async function POST(request: Request) {
+  try {
+    const tournament = await getTournament();
+    if (!tournament) throw Error("Torneo non trovato");
+    await requireAdmin(tournament.id);
+    const body = await request.json().catch(() => ({}));
+    await generateDraw(tournament.id, mode(body.mode));
+    return NextResponse.json({ ok: true });
+  } catch (error: any) { return failure(error); }
+}
+
+export async function PATCH(request: Request) {
+  try {
+    const tournament = await getTournament();
+    if (!tournament) throw Error("Torneo non trovato");
+    await requireAdmin(tournament.id);
+    const body = await request.json().catch(() => ({}));
+    if (body.action === "assign") await assignRepechage(tournament.id, String(body.teamId || ""), String(body.matchId || ""));
+    else if (body.action === "finalize") await finalizeRepechage(tournament.id);
+    else if (body.action === "reset") await resetTournament(tournament.id);
+    else throw Error("Azione di ripescaggio non valida");
+    return NextResponse.json({ ok: true });
+  } catch (error: any) { return failure(error); }
+}
