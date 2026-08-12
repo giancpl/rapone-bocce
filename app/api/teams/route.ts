@@ -21,6 +21,16 @@ async function canChangeStructure(tournament: any) {
 }
 function pair(body: any) { const playerOne = text(body.playerOne, "Primo giocatore"); const playerTwo = text(body.playerTwo, "Secondo giocatore"); return { playerOne, playerTwo, name: `${playerOne} / ${playerTwo}` }; }
 
+export async function GET() {
+  try {
+    const tournament = await getTournament();
+    if (!tournament) throw Error("Torneo non trovato");
+    await requireAdmin(tournament.id);
+    const payments = await prisma.team.findMany({ where: { tournamentId: tournament.id }, select: { id: true, paidAt: true } });
+    return NextResponse.json(payments.map(team => ({ id: team.id, paid: Boolean(team.paidAt) })));
+  } catch (error: any) { return response(error); }
+}
+
 export async function POST(request: Request) {
   try {
     const tournament = await getTournament();
@@ -42,6 +52,11 @@ export async function PATCH(request: Request) {
     await requireAdmin(tournament.id);
     const body = await request.json().catch(() => ({}));
     const id = text(body.id, "Coppia");
+    if (body.action === "payment") {
+      const updated = await prisma.team.updateMany({ where: { id, tournamentId: tournament.id }, data: { paidAt: body.paid === true ? new Date() : null } });
+      if (!updated.count) throw Error("Coppia non trovata");
+      return NextResponse.json({ ok: true });
+    }
     const values = pair(body);
     const updated = await prisma.team.updateMany({ where: { id, tournamentId: tournament.id }, data: values });
     if (!updated.count) throw Error("Coppia non trovata");

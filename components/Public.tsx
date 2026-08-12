@@ -5,8 +5,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import logo from "../logo-hd.png";
 
 const OFFICIAL_START = new Date("2026-08-13T16:00:00+02:00");
-type Match = { id: string; round: number; position: number; field: number | null; a: string | null; b: string | null; scoreA: number; scoreB: number; status: "SCHEDULED" | "LIVE" | "FINISHED"; winner: string | null };
-type Tournament = { name: string; edition: string; status: "SETUP" | "READY" | "LIVE" | "FINISHED"; teams: number; updatedAt: string; matches: Match[] };
+type Match = { id: string; round: number; position: number; field: number | null; a: string | null; b: string | null; scoreA: number; scoreB: number; status: "SCHEDULED" | "READY" | "WAITING" | "LIVE" | "FINISHED"; winner: string | null };
+type Tournament = { name: string; edition: string; status: "SETUP" | "READY" | "LIVE" | "FINISHED"; drawMode?: "PRELIMINARIES" | "REPECHAGE"; teams: number; updatedAt: string; matches: Match[] };
 
 type RegistrationFormProps = {
   playerOne: string;
@@ -74,13 +74,13 @@ export default function Public({ initial, preview = false }: { initial: Tourname
   }
 
   const live = tournament.matches.filter(match => match.status === "LIVE");
-  const next = tournament.matches.filter(match => match.status === "SCHEDULED" && match.a && match.b);
+  const next = tournament.matches.filter(match => ["READY", "WAITING", "SCHEDULED"].includes(match.status) && match.a && match.b);
   const completed = tournament.matches.filter(match => match.status === "FINISHED" && match.a && match.b);
   const totalRounds = [...new Set(tournament.matches.map(match => match.round))].length;
   const champion = tournament.status === "FINISHED" && completed.length ? completed.find(match => match.round === Math.max(...completed.map(item => item.round)))?.winner : null;
   const title = live.length ? "Incontro in corso" : next.length ? "Prossimo incontro" : "Tabellone aggiornato";
 
-  return <main className="publicApp"><PublicHero tournament={tournament} live={live.length} next={next.length} completed={completed.length} totalRounds={totalRounds} />{champion && <section className="champion"><span className="championBadge">1</span><div><p className="kicker">Coppia vincitrice</p><strong>{champion}</strong></div></section>}<nav className="sectionNav" aria-label="Navigazione torneo"><a href="#incontri">Incontri{live.length ? <b>{live.length}</b> : null}</a><a href="#tabellone">Tabellone</a><a href="#risultati">Risultati{completed.length ? <b>{completed.length}</b> : null}</a></nav>{error && <p className="softError">Aggiornamento al prossimo tentativo: {error}</p>}<section className="boardSection featureSection" id="incontri"><div className="sectionHeading"><div><p className="kicker">In evidenza</p><h2>{title}</h2></div>{live.length ? <span className="liveDot">Aggiornamento live</span> : <span className="muted">I prossimi incontri compariranno qui</span>}</div><div className="matchGrid">{(live.length ? live : next.slice(0, 4)).map(match => <MatchCard key={match.id} match={match} prominent={match.status === "LIVE"} />)}{!live.length && !next.length && <Empty text="Non ci sono incontri da mostrare." />}</div></section><section className="boardSection bracketSection" id="tabellone"><div className="sectionHeading"><div><p className="kicker">Tabellone</p><h2>Verso la finale</h2></div><span className="muted">Usa le frecce o scorri orizzontalmente</span></div><Bracket matches={tournament.matches} /></section><section className="boardSection" id="risultati"><div className="sectionHeading"><div><p className="kicker">Archivio</p><h2>Risultati</h2></div><span className="muted">{completed.length} incontri conclusi</span></div><ResultArchive matches={completed} totalRounds={totalRounds} /></section><footer className="siteFooter">Aggiornato alle {new Date(tournament.updatedAt).toLocaleTimeString("it-IT", { hour: "2-digit", minute: "2-digit" })}</footer></main>;
+  return <main className="publicApp"><PublicHero tournament={tournament} live={live.length} next={next.length} completed={completed.length} totalRounds={totalRounds} />{champion && <section className="champion"><span className="championBadge">1</span><div><p className="kicker">Coppia vincitrice</p><strong>{champion}</strong></div></section>}<nav className="sectionNav" aria-label="Navigazione torneo"><a href="#incontri">Incontri{live.length ? <b>{live.length}</b> : null}</a><a href="#tabellone">Tabellone</a><a href="#risultati">Risultati{completed.length ? <b>{completed.length}</b> : null}</a></nav>{error && <p className="softError">Aggiornamento al prossimo tentativo: {error}</p>}<section className="boardSection featureSection" id="incontri"><div className="sectionHeading"><div><p className="kicker">In evidenza</p><h2>{title}</h2></div>{live.length ? <span className="liveDot">Aggiornamento live</span> : <span className="muted">I prossimi incontri compariranno qui</span>}</div><div className="matchGrid">{(live.length ? live : next.slice(0, 4)).map(match => <MatchCard key={match.id} match={match} prominent={match.status === "LIVE"} />)}{!live.length && !next.length && <Empty text="Non ci sono incontri da mostrare." />}</div></section><section className="boardSection bracketSection" id="tabellone"><div className="sectionHeading"><div><p className="kicker">Tabellone</p><h2>Verso la finale</h2></div><span className="muted">Usa le frecce o scorri orizzontalmente</span></div><BracketGuide drawMode={tournament.drawMode} matches={tournament.matches} /><Bracket matches={tournament.matches} /></section><section className="boardSection" id="risultati"><div className="sectionHeading"><div><p className="kicker">Archivio</p><h2>Risultati</h2></div><span className="muted">{completed.length} incontri conclusi</span></div><ResultArchive matches={completed} totalRounds={totalRounds} /></section><footer className="siteFooter">Aggiornato alle {new Date(tournament.updatedAt).toLocaleTimeString("it-IT", { hour: "2-digit", minute: "2-digit" })}</footer></main>;
 }
 
 function Brand() {
@@ -118,6 +118,8 @@ function roundName(round: number, total: number) {
   return remaining === 64 ? "32-esimi" : remaining === 32 ? "16-esimi" : remaining === 16 ? "Ottavi" : remaining === 8 ? "Quarti" : remaining === 4 ? "Semifinali" : "Finale";
 }
 
+function BracketGuide({ drawMode, matches }: { drawMode?: Tournament["drawMode"]; matches: Match[] }) { const active = matches.filter(match => ["WAITING", "LIVE"].includes(match.status)).length; const ready = matches.filter(match => match.status === "READY").length; return <div className="bracketGuide"><b>{drawMode === "REPECHAGE" ? "Formula con ripescaggi" : "Formula con preliminari"}</b><span>{drawMode === "REPECHAGE" ? "I preliminari producono la classifica delle migliori sconfitte; l’organizzazione completa poi gli abbinamenti." : "Le coppie senza avversario avanzano automaticamente al turno successivo."}</span><small>{active} da gestire · {ready} pronti in coda</small></div>; }
+
 function Bracket({ matches }: { matches: Match[] }) {
   const rounds = useMemo(() => [...new Set(matches.map(match => match.round))].sort((a, b) => a - b), [matches]);
   const scroll = useRef<HTMLDivElement>(null);
@@ -144,7 +146,7 @@ function ResultArchive({ matches, totalRounds }: { matches: Match[]; totalRounds
 
 function MatchCard({ match, prominent = false, compact = false, bracket = false }: { match: Match; prominent?: boolean; compact?: boolean; bracket?: boolean }) {
   const isBye = match.status === "FINISHED" && Boolean(match.a) !== Boolean(match.b);
-  const label = isBye ? "Passaggio automatico" : match.status === "LIVE" ? "In corso" : match.status === "SCHEDULED" ? "In attesa" : "Conclusa";
+  const label = isBye ? "Passaggio automatico" : match.status === "LIVE" ? "In corso" : match.status === "WAITING" ? "In attesa giocatori" : match.status === "READY" ? "Pronta" : match.status === "SCHEDULED" ? "In attesa avversario" : "Conclusa";
   const scoreA = match.status === "SCHEDULED" || isBye ? "-" : match.scoreA;
   const scoreB = match.status === "SCHEDULED" || isBye ? "-" : match.scoreB;
   return <article className={["matchCard", prominent ? "prominent" : "", compact ? "compact" : "", bracket ? "bracketCard" : "", isBye ? "bye" : "", match.status.toLowerCase()].join(" ")}><header><span>{label}</span><span className="matchRound">T{match.round}</span>{match.status === "LIVE" && <span className="liveDot">Live</span>}</header><div className={"teamLine " + (match.winner === match.a ? "winner" : "")}><b>{match.a || "Da definire"}</b><strong>{scoreA}</strong></div><div className={"teamLine " + (match.winner === match.b ? "winner" : "")}><b>{match.b || "Da definire"}</b><strong>{scoreB}</strong></div></article>;

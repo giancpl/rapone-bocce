@@ -19,6 +19,8 @@ enum TournamentStatus {
 
 enum MatchStatus {
   SCHEDULED
+  READY
+  WAITING
   LIVE
   FINISHED
 }
@@ -60,6 +62,7 @@ model Team {
   playerOne    String?
   playerTwo    String?
   seed         Int?
+  paidAt       DateTime?
   createdAt    DateTime   @default(now())
   tournament   Tournament @relation(fields: [tournamentId], references: [id], onDelete: Cascade)
   matchesA     Match[]    @relation("MatchTeamA")

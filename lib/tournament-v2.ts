@@ -75,10 +75,12 @@ async function advanceByes(tx: any, tournamentId: string) {
 }
 
 async function schedule(tx: any, tournamentId: string) {
-  const live = await tx.match.count({ where: { tournamentId, status: "LIVE" } });
-  if (live) return;
-  const next = await tx.match.findFirst({ where: { tournamentId, status: "SCHEDULED", teamAId: { not: null }, teamBId: { not: null } }, orderBy: [{ round: "asc" }, { position: "asc" }] });
-  if (next) await tx.match.update({ where: { id: next.id }, data: { status: "LIVE", field: null, startedAt: new Date() } });
+  await tx.match.updateMany({ where: { tournamentId, status: "SCHEDULED", teamAId: { not: null }, teamBId: { not: null } }, data: { status: "READY", field: null } });
+  const occupied = await tx.match.count({ where: { tournamentId, status: { in: ["WAITING", "LIVE"] } } });
+  const slots = Math.max(0, 2 - occupied);
+  if (!slots) return;
+  const next = await tx.match.findMany({ where: { tournamentId, status: "READY", teamAId: { not: null }, teamBId: { not: null } }, orderBy: [{ round: "asc" }, { position: "asc" }], take: slots });
+  for (const match of next) await tx.match.update({ where: { id: match.id }, data: { status: "WAITING", field: null } });
 }
 
 export async function generateDraw(tournamentId: string, drawMode: "PRELIMINARIES" | "REPECHAGE" = "PRELIMINARIES", rebuild = false) {
@@ -126,13 +128,25 @@ export async function startTournament(tournamentId: string) {
 
 const validScore = assertBocceScore;
 
+export async function updateMatchStatus(tournamentId: string, matchId: string, status: "READY" | "WAITING" | "LIVE") {
+  return prisma.$transaction(async tx => {
+    const match = await tx.match.findFirst({ where: { id: matchId, tournamentId } });
+    if (!match || !match.teamAId || !match.teamBId || match.status === "FINISHED") throw Error("Stato incontro non modificabile");
+    if (status === "WAITING" || status === "LIVE") {
+      const occupied = await tx.match.count({ where: { tournamentId, status: { in: ["WAITING", "LIVE"] }, id: { not: match.id } } });
+      if (occupied >= 2) throw Error("Sono già presenti due incontri da gestire: libera prima uno slot");
+    }
+    await tx.match.update({ where: { id: match.id }, data: { status, field: null, startedAt: status === "LIVE" ? new Date() : null } });
+  }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+}
+
 export async function submitResult(tournamentId: string, matchId: string, scoreA: number, scoreB: number) {
   validScore(scoreA, scoreB);
   return prisma.$transaction(async tx => {
     const match = await tx.match.findFirst({ where: { id: matchId, tournamentId } });
     const tournament = await tx.tournament.findUnique({ where: { id: tournamentId } });
     if (!match || !tournament) throw Error("Partita non trovata");
-    if (match.status !== "LIVE") throw Error("La partita non è in corso");
+    if (!(["READY", "WAITING", "LIVE"] as string[]).includes(match.status)) throw Error("La partita non è pronta per il risultato");
     const winnerId = scoreA > scoreB ? match.teamAId : match.teamBId;
     if (!winnerId) throw Error("Coppia vincente non valida");
     const result = await tx.match.update({ where: { id: match.id }, data: { scoreA, scoreB, winnerId, status: "FINISHED", field: null, finishedAt: new Date() } });
