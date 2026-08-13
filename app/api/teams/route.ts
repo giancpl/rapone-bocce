@@ -3,6 +3,7 @@ import { addTournamentTeam, generateTestTeams, getTournamentSummary, regenerateD
 import { prisma } from "../../../lib/db";
 import { requireAdmin } from "../../../lib/auth";
 import { MAX_NAME_LENGTH } from "../../../lib/security";
+import { apiErrorResponse } from "../../../lib/api-error";
 
 function text(value: unknown, label: string) {
   const result = String(value || "").trim().replace(/\s+/g, " ");
@@ -10,7 +11,7 @@ function text(value: unknown, label: string) {
   if (result.length > MAX_NAME_LENGTH) throw Error(`${label} troppo lungo (max ${MAX_NAME_LENGTH})`);
   return result;
 }
-function response(error: any) { const message = error?.code === "P2002" ? "Questa coppia è già iscritta" : error?.code === "P2034" ? "Il tabellone è appena cambiato: riprova l’operazione" : error?.message || "Errore"; return NextResponse.json({ error: message }, { status: message === "NON_AUTORIZZATO" ? 401 : 400 }); }
+function response(error: any) { return apiErrorResponse(error, { duplicate: "Questa coppia è già iscritta" }); }
 async function canChangeStructure(tournament: any) {
   if (tournament.status === "SETUP") return;
   const teamCount = await prisma.team.count({ where: { tournamentId: tournament.id } });

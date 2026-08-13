@@ -1,9 +1,9 @@
 import { NextResponse } from "next/server";
 import { confirmAutomaticRepechage, generateDraw, getTournamentSummary, resetTournament } from "../../../lib/tournament-v2";
 import { confirmAdminPassword, requireAdmin } from "../../../lib/auth";
+import { apiErrorResponse } from "../../../lib/api-error";
 
 function mode(value: unknown) { return value === "REPECHAGE" ? "REPECHAGE" : "PRELIMINARIES" as const; }
-function failure(error: any) { const message = error?.message || "Errore"; return NextResponse.json({ error: message }, { status: message === "NON_AUTORIZZATO" ? 401 : 400 }); }
 
 export async function POST(request: Request) {
   try {
@@ -13,7 +13,7 @@ export async function POST(request: Request) {
     const body = await request.json().catch(() => ({}));
     await generateDraw(tournament.id, mode(body.mode));
     return NextResponse.json({ ok: true });
-  } catch (error: any) { return failure(error); }
+  } catch (error: any) { return apiErrorResponse(error); }
 }
 
 export async function PATCH(request: Request) {
@@ -30,5 +30,5 @@ export async function PATCH(request: Request) {
     }
     else throw Error("Azione non valida");
     return NextResponse.json({ ok: true });
-  } catch (error: any) { return failure(error); }
+  } catch (error: any) { return apiErrorResponse(error); }
 }

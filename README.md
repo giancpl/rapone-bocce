@@ -3,22 +3,20 @@
 Backend persistente per Vercel + PostgreSQL + Prisma 7.
 
 ## Stack
-- Next.js 15.5.21 (Maintenance LTS; patched release)
+- Next.js 16.3.0
 - PostgreSQL
 - Prisma 7 + `@prisma/adapter-pg`
 - bcryptjs per la password
 - sessione admin persistente in database con cookie HttpOnly
 
-Next.js 15.5.21 è attualmente una Maintenance LTS patched release secondo la pagina sicurezza/supporto ufficiale Next.js.
 
 ## Setup locale
 
-1. Copia `.env.example` in `.env`.
-2. Inserisci `DATABASE_URL`.
-3. `npm install`
-4. `npx prisma generate`
-5. `npm run db:migrate`
-6. `npm run dev`
+1. Crea `.env` e inserisci `DATABASE_URL`.
+2. `npm install`
+3. `npx prisma generate`
+4. `npm run db:migrate`
+5. `npm run dev`
 
 ## Vercel
 Collega una PostgreSQL (Prisma Postgres è una scelta naturale su Vercel) e imposta `DATABASE_URL` nelle Environment Variables. Poi:
@@ -33,11 +31,11 @@ Per produzione la migrazione si applica con:
 - sessione server-side
 - cookie HttpOnly + SameSite=Lax + Secure in produzione
 - sessioni con scadenza 12 ore
-- tutte le mutazioni richiedono sessione admin
+- tutte le mutazioni amministrative richiedono una sessione valida
 - sorteggio bloccato dopo READY
-- risultati accettati solo per partite LIVE
+- risultati accettati soltanto per incontri pronti, in attesa o in corso
 - risultato valido con vincitore da 12 a 15 punti; pareggi non ammessi
-- transazione serializable + retry per evitare aggiornamenti concorrenti
+- transazioni serializable con timeout esplicito per le operazioni sul tabellone
 
-## Nota
-La logica "ripescaggio" è modellata come turno preliminare quando il numero di coppie non è una potenza di 2. Questo va confermato con il regolamento reale prima dell'evento.
+## Formati del torneo
+Le modalità preliminari e ripescaggi sono calcolate automaticamente in base al numero di coppie; eventuali spareggi vengono applicati soltanto dopo la conferma dell’amministratore.

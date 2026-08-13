@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getTournament } from "../../../lib/tournament-v2";
 import { login } from "../../../lib/auth";
+import { apiErrorResponse } from "../../../lib/api-error";
 
 export async function POST(request: Request) {
   try {
@@ -11,6 +12,7 @@ export async function POST(request: Request) {
     if (!(await login(tournament.id, body.password))) throw Error("Password non valida");
     return NextResponse.json({ ok: true });
   } catch (error: any) {
-    return NextResponse.json({ error: error?.message || "Accesso non riuscito" }, { status: 401 });
+    if (String(error?.message || "").startsWith("Password")) return NextResponse.json({ error: error.message }, { status: 401 });
+    return apiErrorResponse(error, { fallback: "Accesso non riuscito" });
   }
 }
