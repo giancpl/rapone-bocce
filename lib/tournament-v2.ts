@@ -1,6 +1,6 @@
 import { Prisma } from "../app/generated/prisma/client";
 import { prisma } from "./db";
-import { assertBocceScore, bracketSize, firstRoundSlots, matchDependencyGraph, lateEntryPlans, MAX_CONCURRENT_MATCHES, MAX_TEAMS, repechageCutoff, repechagePlan, repechagePlayoffWave, shuffleItems } from "./bracket";
+import { assertBocceScore, bracketSize, firstRoundSlots, matchDependencyGraph, lateEntryPlans, MAX_CONCURRENT_MATCHES, MAX_TEAMS, MIN_WINNING_SCORE, repechageCutoff, repechagePlan, repechagePlayoffWave, shuffleItems } from "./bracket";
 
 export const PUBLIC_INCLUDE = {
   matches: { orderBy: [{ round: "asc" as const }, { position: "asc" as const }], include: { teamA: true, teamB: true, winner: true } },
@@ -29,7 +29,7 @@ export async function getTournament() {
 }
 
 function defeatedCandidates(tournament: any) {
-  return tournament.matches.filter((match: any) => match.round === 1 && match.status === "FINISHED" && Math.max(match.scoreA, match.scoreB) >= 11 && match.teamA && match.teamB && match.winnerId).map((match: any) => {
+  return tournament.matches.filter((match: any) => match.round === 1 && match.status === "FINISHED" && Math.max(match.scoreA, match.scoreB) >= MIN_WINNING_SCORE && match.teamA && match.teamB && match.winnerId).map((match: any) => {
     const loser = match.winnerId === match.teamAId ? match.teamB : match.teamA;
     const scored = match.winnerId === match.teamAId ? match.scoreB : match.scoreA;
     const conceded = match.winnerId === match.teamAId ? match.scoreA : match.scoreB;
@@ -42,7 +42,7 @@ function repechage(tournament: any) {
   const plan = repechagePlan(tournament.teams.length);
   if (!plan.selections) return null;
   const firstRound = tournament.matches.filter((match: any) => match.round === 1);
-  const qualifying = firstRound.filter((match: any) => match.status === "FINISHED" && Math.max(match.scoreA, match.scoreB) >= 11 && match.teamA && match.teamB && match.winnerId);
+  const qualifying = firstRound.filter((match: any) => match.status === "FINISHED" && Math.max(match.scoreA, match.scoreB) >= MIN_WINNING_SCORE && match.teamA && match.teamB && match.winnerId);
   const candidates = defeatedCandidates(tournament);
   const allQualifiersFinished = qualifying.length === plan.preliminaryMatches;
   const used = new Set(firstRound.filter((match: any) => match.status === "SCHEDULED" && match.teamA && match.teamB).flatMap((match: any) => [match.teamAId, match.teamBId]));

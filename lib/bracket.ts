@@ -1,5 +1,7 @@
 export const MAX_TEAMS = 64;
 export const MAX_CONCURRENT_MATCHES = 2;
+export const MIN_WINNING_SCORE = 12;
+export const MAX_SCORE = 14;
 
 export function bracketSize(teamCount: number) {
   if (!Number.isInteger(teamCount) || teamCount < 2 || teamCount > MAX_TEAMS) {
@@ -43,7 +45,7 @@ export function availableFields(occupied: Array<number | null | undefined>, coun
 }
 
 export function assertBocceScore(a: number, b: number) {
-  if (!Number.isInteger(a) || !Number.isInteger(b) || a < 0 || b < 0 || a > 14 || b > 14 || a === b || Math.max(a, b) < 11) throw Error("Il vincitore deve avere da 11 a 14 punti; pareggi non ammessi");
+  if (!Number.isInteger(a) || !Number.isInteger(b) || a < 0 || b < 0 || a > MAX_SCORE || b > MAX_SCORE || a === b || Math.max(a, b) < MIN_WINNING_SCORE) throw Error(`Il vincitore deve avere da ${MIN_WINNING_SCORE} a ${MAX_SCORE} punti; pareggi non ammessi`);
 }
 
 

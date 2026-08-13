@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { assertBocceScore, bracketSize, cascadeCoordinates, firstRoundSlots, MAX_CONCURRENT_MATCHES, MAX_TEAMS, nextMatchCoordinate, lateEntryPlans, matchDependencyGraph, repechageCutoff, repechagePlan, repechagePlayoffWave, shuffleItems } from "../lib/bracket.ts";
+import { assertBocceScore, bracketSize, cascadeCoordinates, firstRoundSlots, MAX_CONCURRENT_MATCHES, MAX_SCORE, MAX_TEAMS, MIN_WINNING_SCORE, nextMatchCoordinate, lateEntryPlans, matchDependencyGraph, repechageCutoff, repechagePlan, repechagePlayoffWave, shuffleItems } from "../lib/bracket.ts";
 
 test("every supported team count creates a traversable first round", () => {
   for (let count = 2; count <= MAX_TEAMS; count++) {
@@ -15,9 +15,11 @@ test("every supported team count creates a traversable first round", () => {
 
 test("invalid team counts and bocce scores are rejected", () => {
   for (const count of [0, 1, MAX_TEAMS + 1, 3.5]) assert.throws(() => bracketSize(count));
-  for (const score of [[10, 0], [11, 11], [15, 2], [-1, 11], [11.5, 2]]) assert.throws(() => assertBocceScore(score[0], score[1]));
-  assert.doesNotThrow(() => assertBocceScore(11, 0));
+  for (const score of [[11, 0], [12, 12], [15, 2], [-1, 12], [12.5, 2]]) assert.throws(() => assertBocceScore(score[0], score[1]));
+  assert.doesNotThrow(() => assertBocceScore(12, 0));
   assert.doesNotThrow(() => assertBocceScore(14, 13));
+  assert.equal(MIN_WINNING_SCORE, 12);
+  assert.equal(MAX_SCORE, 14);
 });
 
 test("at most two matches can run concurrently", () => {
