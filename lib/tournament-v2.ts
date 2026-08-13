@@ -1,6 +1,6 @@
 import { Prisma } from "../app/generated/prisma/client";
 import { prisma } from "./db";
-import { assertBocceScore, bracketSize, firstRoundSlots, matchDependencyGraph, lateEntryPlans, MAX_CONCURRENT_MATCHES, MAX_TEAMS, MIN_WINNING_SCORE, repechageCutoff, repechagePlan, repechagePlayoffWave, repechageRoundSlots, shuffleItems } from "./bracket";
+import { assertBocceScore, automaticByeWinner, bracketSize, firstRoundSlots, matchDependencyGraph, lateEntryPlans, MAX_CONCURRENT_MATCHES, MAX_TEAMS, MIN_WINNING_SCORE, repechageCutoff, repechagePlan, repechagePlayoffWave, repechageRoundSlots, shuffleItems } from "./bracket";
 
 export const PUBLIC_INCLUDE = {
   matches: { orderBy: [{ round: "asc" as const }, { position: "asc" as const }], include: { teamA: true, teamB: true, winner: true } },
@@ -149,14 +149,18 @@ async function advanceByes(tx: any, tournamentId: string) {
     const lastRound = Math.max(0, ...matches.map((match: any) => match.round));
     for (const match of matches) {
       if (match.round === lastRound && match.position === 1) continue;
-      const winnerId = match.teamAId ?? match.teamBId;
-      if (!winnerId || (match.teamAId && match.teamBId)) continue;
-      if (match.round > 1) {
-        const unresolved = await tx.match.count({ where: { tournamentId, round: match.round - 1, position: { in: [match.position * 2, match.position * 2 + 1] }, status: { not: "FINISHED" } } });
+      if (!automaticByeWinner(match)) continue;
+      // Un passaggio precedente può avere appena riempito l'altro slot:
+      // rileggere evita di chiudere come bye un incontro ora completo.
+      const current = await tx.match.findUnique({ where: { id: match.id } });
+      const winnerId = current ? automaticByeWinner(current) : null;
+      if (!current || !winnerId) continue;
+      if (current.round > 1) {
+        const unresolved = await tx.match.count({ where: { tournamentId, round: current.round - 1, position: { in: [current.position * 2, current.position * 2 + 1] }, status: { not: "FINISHED" } } });
         if (unresolved) continue;
       }
-      await tx.match.update({ where: { id: match.id }, data: { status: "FINISHED", winnerId, finishedAt: new Date() } });
-      await advance(tx, tournamentId, match.round, match.position, winnerId);
+      await tx.match.update({ where: { id: current.id }, data: { status: "FINISHED", winnerId, finishedAt: new Date() } });
+      await advance(tx, tournamentId, current.round, current.position, winnerId);
       changed = true;
     }
   }

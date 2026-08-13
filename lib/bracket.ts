@@ -50,6 +50,11 @@ export function nextMatchCoordinate(round: number, position: number) {
   return { round: round + 1, position: Math.floor(position / 2), slot: position % 2 === 0 ? "a" as const : "b" as const };
 }
 
+export function automaticByeWinner(match: { status: string; teamAId: string | null; teamBId: string | null }) {
+  if (match.status !== "SCHEDULED" || Boolean(match.teamAId) === Boolean(match.teamBId)) return null;
+  return match.teamAId ?? match.teamBId;
+}
+
 export function assertBocceScore(a: number, b: number) {
   if (!Number.isInteger(a) || !Number.isInteger(b) || a < 0 || b < 0 || a > MAX_SCORE || b > MAX_SCORE || a === b || Math.max(a, b) < MIN_WINNING_SCORE) throw Error(`Il vincitore deve avere da ${MIN_WINNING_SCORE} a ${MAX_SCORE} punti; pareggi non ammessi`);
 }

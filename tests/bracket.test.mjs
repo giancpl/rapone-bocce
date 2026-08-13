@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { assertBocceScore, bracketSize, cascadeCoordinates, firstRoundSlots, MAX_CONCURRENT_MATCHES, MAX_SCORE, MAX_TEAMS, MIN_WINNING_SCORE, nextMatchCoordinate, lateEntryPlans, matchDependencyGraph, repechageCutoff, repechagePlan, repechagePlayoffWave, repechageRoundSlots, shuffleItems, tournamentEstimate, tournamentFormatAdvice } from "../lib/bracket.ts";
+import { assertBocceScore, automaticByeWinner, bracketSize, cascadeCoordinates, firstRoundSlots, MAX_CONCURRENT_MATCHES, MAX_SCORE, MAX_TEAMS, MIN_WINNING_SCORE, nextMatchCoordinate, lateEntryPlans, matchDependencyGraph, repechageCutoff, repechagePlan, repechagePlayoffWave, repechageRoundSlots, shuffleItems, tournamentEstimate, tournamentFormatAdvice } from "../lib/bracket.ts";
 
 test("every supported team count creates a traversable first round", () => {
   for (let count = 2; count <= MAX_TEAMS; count++) {
@@ -31,6 +31,13 @@ test("next slots remain deterministic", () => {
   assert.deepEqual(nextMatchCoordinate(1, 1), { round: 2, position: 0, slot: "b" });
 });
 
+
+test("automatic byes are valid only while exactly one slot is occupied", () => {
+  assert.equal(automaticByeWinner({ status: "SCHEDULED", teamAId: "A", teamBId: null }), "A");
+  assert.equal(automaticByeWinner({ status: "SCHEDULED", teamAId: null, teamBId: "B" }), "B");
+  assert.equal(automaticByeWinner({ status: "SCHEDULED", teamAId: "A", teamBId: "B" }), null);
+  assert.equal(automaticByeWinner({ status: "FINISHED", teamAId: "A", teamBId: null }), null);
+});
 
 test("repechage rounds pair every possible team before selecting losers", () => {
   for (let count = 2; count <= MAX_TEAMS; count++) {
