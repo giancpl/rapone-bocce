@@ -118,7 +118,7 @@ export function publicTournament(tournament: any) {
     id: tournament.id, name: tournament.name, edition: tournament.edition, status: tournament.status, drawMode: tournament.drawMode,
     teams: tournament.teams.length, canChangeStructure: management.canRemove, teamManagement: management, teamList: tournament.teams.map((team: any) => ({ id: team.id, name: displayName(team), playerOne: team.playerOne, playerTwo: team.playerTwo })),
     repechage: repechage(tournament), updatedAt: tournament.updatedAt,
-    matches: tournament.matches.map((match: any) => ({ id: match.id, round: match.round, position: match.position, field: match.field, a: match.teamA ? displayName(match.teamA) : null, b: match.teamB ? displayName(match.teamB) : null, scoreA: match.scoreA, scoreB: match.scoreB, status: match.status, winner: match.winner ? displayName(match.winner) : null })),
+    matches: tournament.matches.map((match: any) => ({ id: match.id, round: match.round, position: match.position, a: match.teamA ? displayName(match.teamA) : null, b: match.teamB ? displayName(match.teamB) : null, scoreA: match.scoreA, scoreB: match.scoreB, status: match.status, winner: match.winner ? displayName(match.winner) : null })),
   };
 }
 
@@ -217,6 +217,10 @@ export async function generateDraw(tournamentId: string, drawMode: "PRELIMINARIE
     if (!tournament) throw Error("Torneo non trovato");
     if (tournament.status !== "SETUP" && !rebuild) throw Error("Il sorteggio è consentito solo durante la configurazione");
     const teams = await tx.team.findMany({ where: { tournamentId } });
+    if (!rebuild) {
+      const pendingRegistrations = await tx.registration.count({ where: { tournamentId, status: "PENDING" } });
+      if (pendingRegistrations) throw Error("Gestisci tutte le richieste di iscrizione prima di avviare il torneo");
+    }
     if (rebuild) {
       const played = await tx.match.count({ where: { tournamentId, status: "FINISHED", teamAId: { not: null }, teamBId: { not: null } } });
       if (played) throw Error("Ci sono risultati registrati: puoi modificare i nomi, ma non aggiungere o rimuovere coppie");
@@ -338,10 +342,43 @@ export async function addTournamentTeam(tournamentId: string, values: { name: st
   }, TRANSACTION_OPTIONS);
 }
 
-export async function regenerateDraw(tournamentId: string) {
-  const tournament = await prisma.tournament.findUnique({ where: { id: tournamentId } });
-  if (!tournament || tournament.status === "SETUP") return null;
-  return generateDraw(tournamentId, tournament.drawMode, true);
+export async function removeTournamentTeam(tournamentId: string, teamId: string) {
+  return prisma.$transaction(async tx => {
+    const tournament = await tx.tournament.findUnique({
+      where: { id: tournamentId },
+      include: { teams: true, matches: true }
+    });
+    if (!tournament) throw Error("Torneo non trovato");
+    if (tournament.status === "FINISHED") throw Error("Il torneo è concluso: puoi ancora correggere i nominativi");
+
+    const team = tournament.teams.find(item => item.id === teamId);
+    if (!team) throw Error("Coppia non trovata");
+
+    const hasPlayedMatch = tournament.matches.some(match => match.status === "FINISHED" && match.teamAId && match.teamBId);
+    if (hasPlayedMatch) throw Error("Ci sono risultati registrati: puoi modificare i nomi e aggiungere solo negli slot sicuri, ma non rimuovere coppie");
+    if (tournament.status !== "SETUP" && tournament.teams.length <= 2) throw Error("Il tabellone richiede almeno due coppie");
+
+    if (tournament.status === "SETUP" || tournament.matches.length === 0) {
+      if (tournament.matches.length) await tx.match.deleteMany({ where: { tournamentId } });
+      await tx.team.delete({ where: { id: teamId } });
+      return { regenerated: false, id: teamId };
+    }
+
+    const teams = tournament.teams.filter(item => item.id !== teamId);
+    const size = bracketSize(teams.length);
+    const shuffled = shuffleItems(teams);
+    const slots = tournament.drawMode === "REPECHAGE" ? repechageRoundSlots(shuffled) : firstRoundSlots(shuffled);
+    await tx.match.deleteMany({ where: { tournamentId } });
+    await tx.team.delete({ where: { id: teamId } });
+    await tx.match.createMany({ data: bracketMatchRows(tournamentId, size, slots, teams.length) });
+    await advanceByes(tx, tournamentId);
+    if (tournament.status === "LIVE") await schedule(tx, tournamentId);
+    await tx.tournament.update({
+      where: { id: tournamentId },
+      data: { finishedAt: null, repechageFinalizedAt: null }
+    });
+    return { regenerated: true, id: teamId };
+  }, TRANSACTION_OPTIONS);
 }
 
 export async function launchTournament(tournamentId: string, drawMode: "PRELIMINARIES" | "REPECHAGE" = "PRELIMINARIES") {

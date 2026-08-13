@@ -213,3 +213,92 @@ test("semifinals feed winners to the final and losers to the third-place match",
   assert.deepEqual(quarter.affected.map(match => match.id), ["semi-a", "final", "third"]);
   assert.equal(quarter.edges.filter(edge => edge.toId === "third").length, 1);
 });
+
+
+test("direct brackets advance every supported team count through podium matches", () => {
+  for (let count = 2; count <= MAX_TEAMS; count++) {
+    const teams = Array.from({ length: count }, (_, index) => "T" + index);
+    const size = bracketSize(count);
+    const totalRounds = Math.log2(size);
+    const slots = firstRoundSlots(teams);
+    const matches = new Map();
+
+    for (let round = 1; round <= totalRounds; round++) {
+      for (let position = 0; position < size / 2 ** round; position++) {
+        matches.set(round + ":" + position, {
+          round,
+          position,
+          a: round === 1 ? slots[position * 2] : null,
+          b: round === 1 ? slots[position * 2 + 1] : null,
+          done: false
+        });
+      }
+    }
+    if (count >= 4) matches.set(totalRounds + ":1", { round: totalRounds, position: 1, a: null, b: null, done: false });
+
+    let played = 0;
+    let changed = true;
+    while (changed) {
+      changed = false;
+      for (let round = 1; round <= totalRounds; round++) {
+        for (let position = 0; position < size / 2 ** round; position++) {
+          const match = matches.get(round + ":" + position);
+          if (match.done) continue;
+          const sourcesResolved = round === 1 ||
+            matches.get((round - 1) + ":" + (position * 2)).done &&
+            matches.get((round - 1) + ":" + (position * 2 + 1)).done;
+          if (!sourcesResolved || !match.a && !match.b) continue;
+
+          const winner = match.a || match.b;
+          const loser = match.a && match.b ? match.b : null;
+          if (match.a && match.b) played++;
+          match.done = true;
+          if (round < totalRounds) {
+            const next = matches.get((round + 1) + ":" + Math.floor(position / 2));
+            next[position % 2 === 0 ? "a" : "b"] = winner;
+          }
+          if (count >= 4 && round === totalRounds - 1) {
+            const third = matches.get(totalRounds + ":1");
+            third[position % 2 === 0 ? "a" : "b"] = loser;
+          }
+          changed = true;
+        }
+      }
+
+      const third = matches.get(totalRounds + ":1");
+      if (third && !third.done && third.a && third.b) {
+        third.done = true;
+        played++;
+        changed = true;
+      }
+    }
+
+    assert.ok([...matches.values()].every(match => match.done), count + " teams: incomplete bracket");
+    assert.equal(played, count - 1 + (count >= 4 ? 1 : 0), count + " teams: wrong number of played matches");
+    assert.ok(teams.includes(matches.get(totalRounds + ":0").a) && teams.includes(matches.get(totalRounds + ":0").b));
+  }
+});
+
+test("repechage plans always account for every place in the next round", () => {
+  for (let count = 2; count <= MAX_TEAMS; count++) {
+    const plan = repechagePlan(count);
+    assert.equal(plan.preliminaryMatches + plan.byeSlots + plan.selections, plan.size / 2);
+    assert.ok(plan.selections >= 0);
+    assert.ok(plan.selections <= plan.preliminaryMatches);
+  }
+});
+
+test("dependency graph keeps final and third-place branches isolated", () => {
+  const matches = [
+    { id: "semi-a", round: 2, position: 0 },
+    { id: "semi-b", round: 2, position: 1 },
+    { id: "final", round: 3, position: 0 },
+    { id: "third", round: 3, position: 1 }
+  ];
+  assert.deepEqual(matchDependencyGraph(matches, "semi-b").edges, [
+    { fromId: "semi-b", toId: "final", slot: "teamBId", outcome: "winner" },
+    { fromId: "semi-b", toId: "third", slot: "teamBId", outcome: "loser" }
+  ]);
+  assert.deepEqual(matchDependencyGraph(matches, "final"), { affected: [], edges: [] });
+  assert.deepEqual(matchDependencyGraph(matches, "third"), { affected: [], edges: [] });
+});

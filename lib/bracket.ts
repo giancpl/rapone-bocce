@@ -46,15 +46,8 @@ export function repechageRoundSlots<T>(teams: T[]): Array<T | null> {
 }
 
 
-export const FIELD_COUNT = 2;
-
 export function nextMatchCoordinate(round: number, position: number) {
   return { round: round + 1, position: Math.floor(position / 2), slot: position % 2 === 0 ? "a" as const : "b" as const };
-}
-
-export function availableFields(occupied: Array<number | null | undefined>, count = FIELD_COUNT) {
-  const used = new Set(occupied.filter((field): field is number => Number.isInteger(field)));
-  return Array.from({ length: count }, (_, index) => index + 1).filter(field => !used.has(field));
 }
 
 export function assertBocceScore(a: number, b: number) {
