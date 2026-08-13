@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { assertBocceScore, bracketSize, cascadeCoordinates, firstRoundSlots, MAX_TEAMS, nextMatchCoordinate, repechageCutoff, repechagePlan, repechagePlayoffWave, shuffleItems } from "../lib/bracket.ts";
+import { assertBocceScore, bracketSize, cascadeCoordinates, firstRoundSlots, MAX_TEAMS, nextMatchCoordinate, lateEntryPlans, repechageCutoff, repechagePlan, repechagePlayoffWave, shuffleItems } from "../lib/bracket.ts";
 
 test("every supported team count creates a traversable first round", () => {
   for (let count = 2; count <= MAX_TEAMS; count++) {
@@ -104,4 +104,42 @@ test("cutoff validation covers zero selections, complete ties and invalid reques
   }
   assert.throws(() => repechageCutoff(tied, -1));
   assert.throws(() => repechageCutoff(tied, tied.length + 1));
+});
+
+
+test("late entries use only branches without played dependent matches", () => {
+  const safe = lateEntryPlans([
+    { id: "first", round: 1, position: 0, teamAId: "A", teamBId: null, winnerId: "A", status: "FINISHED" },
+    { id: "second", round: 2, position: 0, teamAId: "A", teamBId: "B", winnerId: null, status: "READY" },
+    { id: "final", round: 3, position: 0, teamAId: null, teamBId: null, winnerId: null, status: "SCHEDULED" }
+  ]);
+  assert.equal(safe.length, 1);
+  assert.equal(safe[0].matchId, "first");
+  assert.equal(safe[0].openSlot, "teamBId");
+  assert.deepEqual(safe[0].resetMatchIds, ["first", "second"]);
+  assert.deepEqual(safe[0].clearSlots, [{ matchId: "second", slot: "teamAId" }]);
+
+  const live = [
+    { id: "first", round: 1, position: 0, teamAId: "A", teamBId: null, winnerId: "A", status: "FINISHED" },
+    { id: "second", round: 2, position: 0, teamAId: "A", teamBId: "B", winnerId: null, status: "LIVE" }
+  ];
+  assert.deepEqual(lateEntryPlans(live), []);
+  assert.deepEqual(lateEntryPlans([{ ...live[0] }, { ...live[1], status: "FINISHED", winnerId: "B" }]), []);
+});
+
+test("late entries safely reopen chains made only of automatic byes", () => {
+  const plans = lateEntryPlans([
+    { id: "r1", round: 1, position: 0, teamAId: "A", teamBId: null, winnerId: "A", status: "FINISHED" },
+    { id: "r2", round: 2, position: 0, teamAId: "A", teamBId: null, winnerId: "A", status: "FINISHED" },
+    { id: "r3", round: 3, position: 0, teamAId: "A", teamBId: "C", winnerId: null, status: "WAITING" }
+  ]);
+  assert.equal(plans.length, 1);
+  assert.deepEqual(plans[0].resetMatchIds, ["r1", "r2", "r3"]);
+  assert.deepEqual(plans[0].clearSlots, [
+    { matchId: "r2", slot: "teamAId" },
+    { matchId: "r3", slot: "teamAId" }
+  ]);
+  assert.deepEqual(lateEntryPlans([{ id: "open", round: 1, position: 2, teamAId: null, teamBId: "D", winnerId: null, status: "SCHEDULED" }])[0], {
+    matchId: "open", openSlot: "teamAId", opponentId: "D", resetMatchIds: ["open"], clearSlots: []
+  });
 });

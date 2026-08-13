@@ -84,6 +84,71 @@ export function repechagePlayoffWave<T>(survivors: T[], qualifierCount: number, 
 }
 
 
+export type LateEntryMatch = {
+  id: string;
+  round: number;
+  position: number;
+  teamAId: string | null;
+  teamBId: string | null;
+  winnerId: string | null;
+  status: string;
+};
+
+export type LateEntryPlan = {
+  matchId: string;
+  openSlot: "teamAId" | "teamBId";
+  opponentId: string;
+  resetMatchIds: string[];
+  clearSlots: Array<{ matchId: string; slot: "teamAId" | "teamBId" }>;
+};
+
+export function lateEntryPlans(matches: LateEntryMatch[]): LateEntryPlan[] {
+  const byCoordinate = new Map(matches.map(match => [match.round + ":" + match.position, match]));
+  const plans: LateEntryPlan[] = [];
+
+  for (const source of matches.filter(match => match.round === 1 && Boolean(match.teamAId) !== Boolean(match.teamBId))) {
+    const opponentId = source.teamAId ?? source.teamBId;
+    if (!opponentId || source.status === "LIVE") continue;
+    if (source.status === "FINISHED" && source.winnerId !== opponentId) continue;
+    if (source.status !== "FINISHED" && source.winnerId) continue;
+
+    const resetMatchIds = [source.id];
+    const clearSlots: LateEntryPlan["clearSlots"] = [];
+    let current = source;
+    let valid = true;
+
+    while (current.winnerId) {
+      const coordinate = nextMatchCoordinate(current.round, current.position);
+      const next = byCoordinate.get(coordinate.round + ":" + coordinate.position);
+      if (!next) break;
+      const slot = coordinate.slot === "a" ? "teamAId" : "teamBId";
+      const propagated = next[slot];
+
+      if (!propagated) break;
+      if (propagated !== current.winnerId || next.status === "LIVE") { valid = false; break; }
+      if (next.status === "FINISHED" && next.teamAId && next.teamBId) { valid = false; break; }
+      if (next.winnerId && next.status !== "FINISHED") { valid = false; break; }
+
+      clearSlots.push({ matchId: next.id, slot });
+      resetMatchIds.push(next.id);
+      if (next.status !== "FINISHED") break;
+      if (next.winnerId !== current.winnerId) { valid = false; break; }
+      current = next;
+    }
+
+    if (valid) plans.push({
+      matchId: source.id,
+      openSlot: source.teamAId ? "teamBId" : "teamAId",
+      opponentId,
+      resetMatchIds: [...new Set(resetMatchIds)],
+      clearSlots
+    });
+  }
+
+  return plans.sort((a, b) => a.resetMatchIds.length - b.resetMatchIds.length || a.matchId.localeCompare(b.matchId));
+}
+
+
 export function cascadeCoordinates(round: number, position: number, totalRounds: number) {
   const cascade = [];
   let currentRound = round, currentPosition = position;

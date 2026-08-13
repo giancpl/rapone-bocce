@@ -144,3 +144,103 @@ body{background:var(--paper)}body:before{display:none}.landing{background:#eef1e
 
 /* Ripescaggi automatici e spareggi */
 .automaticRepechage{margin-bottom:20px;padding:16px;border:1px solid var(--line);border-radius:7px;background:#f8faf8}.repechageRanking{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:8px;margin-top:14px}.repechageRanking>div{display:grid;grid-template-columns:28px minmax(0,1fr);gap:3px 8px;align-items:center;padding:10px;border:1px solid var(--line);border-radius:6px;background:#fff}.repechageRanking span{grid-row:1/3;color:var(--green);font-size:11px;font-weight:900}.repechageRanking b{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px}.repechageRanking small{color:var(--muted);font-size:10px}.autoQualified{display:grid;gap:4px;margin-top:12px;padding:10px 12px;border-left:3px solid var(--green);background:#edf4ef}.autoQualified span{color:var(--muted);font-size:10px;font-weight:850;text-transform:uppercase}.autoQualified b{font-size:12px}.playoffSummary{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:8px;margin-top:14px}.playoffSummary>div{display:grid;gap:5px;padding:11px;border:1px solid #d5dfd7;border-radius:6px;background:#fff}.playoffSummary span{color:var(--green);font-size:9px;font-weight:900;letter-spacing:.08em;text-transform:uppercase}.playoffSummary b{font-size:12px}.playoffSummary small{color:var(--muted);font-size:10px}.bracketRound:has(.bracketCard):first-child .roundLabel,.adminBracket .bracketRound:first-child:has(.miniMatch) .roundLabel{color:var(--green)}@media(max-width:600px){.repechageRanking,.playoffSummary{grid-template-columns:1fr}}
+
+
+/* Navigazione del tabellone, inserimenti tardivi e rifinitura smartphone */
+.bracketRoundTabs{display:flex;gap:7px;overflow-x:auto;margin:0 0 14px;padding:4px;scrollbar-width:thin;scrollbar-color:#aebbb1 transparent;overscroll-behavior-inline:contain}
+.bracketRoundTabs button{display:flex;flex:0 0 auto;align-items:center;justify-content:space-between;gap:12px;min-width:132px;min-height:43px;padding:0 11px;border:1px solid var(--line);border-radius:6px;background:#fff;color:var(--muted);font-size:11px;font-weight:850;text-align:left}
+.bracketRoundTabs button:hover,.bracketRoundTabs button:focus-visible{border-color:#9cb1a1;background:#f6f9f6;color:var(--green);outline:none}
+.bracketRoundTabs button.active{border-color:var(--green);background:var(--green);color:#fff}
+.bracketRoundTabs button span{white-space:nowrap}
+.bracketRoundTabs button small{display:grid;place-items:center;min-width:22px;height:22px;padding:0 5px;border-radius:4px;background:#edf1ee;color:var(--green);font-size:10px}
+.bracketRoundTabs button.active small{background:#fff;color:var(--green)}
+.bracketScroll{scroll-behavior:smooth;scroll-snap-type:x proximity;overscroll-behavior-inline:contain}
+.bracketRound{flex:none;scroll-snap-align:start;scroll-margin-inline:4px}
+.bracketRound.current .roundLabel{padding-left:8px;border-left:3px solid var(--green);color:var(--green)}
+.bracketRound.current .roundLabel small{color:var(--green)}
+.bracketCard .matchRound{min-width:36px;padding-inline:6px}
+.miniMatchMeta{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px 9px;border-bottom:1px solid var(--line);background:#f6f8f6}
+.miniMatchMeta b{color:var(--green);font-size:10px;text-transform:uppercase;letter-spacing:.06em}
+.miniMatchMeta small{color:var(--muted);font-size:9px;font-weight:800;text-transform:uppercase}
+.bracketPath em{white-space:normal;text-align:right}
+.structuralNotice.safeNotice{border-color:#bfd2c3;background:#f2f7f3}
+.structuralNotice.safeNotice p{color:#315843}
+.structuralNotice>b{flex:none;padding:7px 9px;border-radius:5px;background:#dfece2;color:var(--green);font-size:10px;text-transform:uppercase;letter-spacing:.06em;white-space:nowrap}
+.teamManagementPanel .pairEntry{align-items:stretch}
+.teamManagementPanel .pairEntry .primaryButton{min-width:154px}
+.adminBracketExplorer{min-width:0}
+
+@media(max-width:700px){
+  .publicApp,.adminApp,.simulation{width:calc(100% - 16px)}
+  .heroHeader{margin-top:8px;padding:14px}
+  .heroIdentity{gap:10px}
+  .heroIdentity .brandLogo{width:56px;height:56px}
+  .heroIdentity h1{font-size:clamp(29px,10vw,38px);line-height:1}
+  .heroCopy{font-size:13px}
+  .heroPanel{padding:10px}
+  .tournamentStats span{min-height:58px}
+  .sectionNav{top:4px;margin:9px 0 19px}
+  .sectionNav a{min-width:104px}
+  .boardSection{margin:28px 0}
+  .featureSection{padding:12px}
+  .bracketExplorer{padding:10px}
+  .bracketCurrent{margin-bottom:9px;padding:9px}
+  .bracketCurrent small{font-size:9px}
+  .bracketRoundTabs{margin:0 -2px 12px;padding:2px 2px 5px;scrollbar-width:none}
+  .bracketRoundTabs::-webkit-scrollbar{display:none}
+  .bracketRoundTabs button{min-width:124px;min-height:44px}
+  .bracketScroll{overflow:visible;margin:0;padding:0}
+  .bracket{display:block;min-width:0}
+  .bracketRound{display:none;width:100%}
+  .bracketRound.selected{display:block}
+  .roundMatches,.bracketRound:not(:first-child) .roundMatches{min-height:0;justify-content:flex-start;gap:9px}
+  .bracketCard,.miniMatch{width:100%}
+  .bracketCard .teamLine,.miniMatch span{font-size:12px}
+  .bracketCard .teamLine b{overflow:visible;white-space:normal}
+  .bracketCard .bracketPath{align-items:flex-start}
+  .bracketCard .bracketPath em,.miniMatch .bracketPath em{margin-left:0}
+  .adminHeader{align-items:flex-start;flex-direction:column;gap:10px;min-height:auto;padding:16px 0 10px}
+  .adminHeader h1{font-size:29px}
+  .headerActions{display:grid;grid-template-columns:1fr 1fr auto;gap:5px;width:100%}
+  .headerActions a,.headerActions .textButton{display:inline-flex;min-height:38px;justify-content:center;padding:7px;font-size:10px}
+  .adminOverview{gap:13px;padding:14px}
+  .adminStats{gap:6px}
+  .adminStats span{min-width:0;text-align:center}
+  .adminTabs{top:4px;margin:12px 0}
+  .adminPanel{margin-top:12px;padding:14px}
+  .pairEntry{gap:7px}
+  .pairEntry .primaryButton,.teamManagementPanel .pairEntry .primaryButton{width:100%;min-width:0}
+  .teamRoster{grid-template-columns:1fr}
+  .rosterRow{grid-template-columns:26px minmax(0,1fr);gap:7px}
+  .rosterRow>b{overflow-wrap:anywhere;line-height:1.3}
+  .rosterActions{grid-column:1/-1;display:grid;grid-template-columns:1fr auto auto;gap:6px;width:100%;padding-top:6px;border-top:1px solid #edf0ed}
+  .paymentCheck{justify-content:flex-start}
+  .rosterActions .minorButton{min-height:36px}
+  .rosterActions .iconButton{width:36px;height:36px}
+  .structuralNotice{padding:11px}
+  .structuralNotice>b{white-space:normal}
+  .matchControlLanes{gap:10px}
+  .adminMatchLane{padding:10px}
+  .controlTeams{grid-template-columns:minmax(0,1fr) auto minmax(0,1fr);gap:6px}
+  .controlTeams b{overflow-wrap:anywhere}
+  .modalBackdrop{align-items:end;padding:0}
+  .modalCard{width:100%;max-height:92dvh;overflow-y:auto;padding:20px 16px calc(16px + env(safe-area-inset-bottom));border-radius:12px 12px 0 0}
+  .modalCard h2{font-size:24px}
+  .matchStateActions{grid-template-columns:repeat(3,minmax(0,1fr))}
+  .matchStateActions button{min-height:44px}
+  .modalActions{position:sticky;bottom:0;margin:18px -4px -4px;padding:8px 4px 4px;background:var(--panel)}
+  .simulationBoard{margin-right:-8px;padding-right:8px;scroll-snap-type:x mandatory;overscroll-behavior-inline:contain}
+  .simRound{width:calc(100vw - 40px);scroll-snap-align:start}
+  .simMatch.manual{min-height:0}
+}
+
+@media(max-width:390px){
+  .tournamentStats{grid-template-columns:1fr 1fr}
+  .countdownUnits{gap:4px}
+  .countdownUnits span{padding:5px 2px}
+  .adminStats b{font-size:21px}
+  .headerActions{grid-template-columns:1fr 1fr}
+  .headerActions .textButton{grid-column:1/-1}
+  .matchStateActions{gap:4px}
+  .matchStateActions button{padding:4px;font-size:10px}
+}

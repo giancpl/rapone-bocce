@@ -1,6 +1,6 @@
 import { Prisma } from "../app/generated/prisma/client";
 import { prisma } from "./db";
-import { assertBocceScore, bracketSize, cascadeCoordinates, firstRoundSlots, repechageCutoff, repechagePlan, repechagePlayoffWave, shuffleItems } from "./bracket";
+import { assertBocceScore, bracketSize, cascadeCoordinates, firstRoundSlots, lateEntryPlans, MAX_TEAMS, repechageCutoff, repechagePlan, repechagePlayoffWave, shuffleItems } from "./bracket";
 
 export const PUBLIC_INCLUDE = {
   matches: { orderBy: [{ round: "asc" as const }, { position: "asc" as const }], include: { teamA: true, teamB: true, winner: true } },
@@ -55,11 +55,31 @@ function repechage(tournament: any) {
   const cutoff = allQualifiersFinished ? repechageCutoff(candidates, plan.selections) : null;
   return { automatic: true, qualifying: { completed: qualifying.length, total: plan.preliminaryMatches }, selections: plan.selections, assigned: assignments.length, ready: allQualifiersFinished, needsPlayoff: Boolean(cutoff?.needsPlayoff), guaranteed: cutoff?.guaranteed.map((team: any) => team.name) ?? [], candidates: candidates.filter((candidate: any) => !used.has(candidate.id)), slots, assignments, playoffs };
 }
+
+function teamManagement(tournament: any) {
+  const teamCount = tournament.teams.length;
+  const hasPlayedMatch = tournament.matches.some((match: any) => match.status === "FINISHED" && match.teamAId && match.teamBId);
+  const canRebuild = tournament.status !== "FINISHED" && !hasPlayedMatch;
+  const repechageLocked = tournament.drawMode === "REPECHAGE" && (
+    Boolean(tournament.repechageFinalizedAt) ||
+    tournament.matches.some((match: any) => match.round === 0 && ["LIVE", "FINISHED"].includes(match.status))
+  );
+  const slots = hasPlayedMatch && !repechageLocked ? lateEntryPlans(tournament.matches) : [];
+  const canAdd = teamCount < MAX_TEAMS && tournament.status !== "FINISHED" && (canRebuild || slots.length > 0);
+  const mode = tournament.status === "FINISHED" ? "finished" :
+    teamCount >= MAX_TEAMS ? "full" :
+    canRebuild ? (tournament.status === "SETUP" ? "setup" : "redraw") :
+    repechageLocked ? "repechage-locked" :
+    slots.length ? "slot" : "no-slot";
+  return { canAdd, canRemove: canRebuild, availableSlots: slots.length, mode };
+}
+
 export function publicTournament(tournament: any) {
   if (!tournament) return null;
+  const management = teamManagement(tournament);
   return {
     id: tournament.id, name: tournament.name, edition: tournament.edition, status: tournament.status, drawMode: tournament.drawMode,
-    teams: tournament.teams.length, canChangeStructure: tournament.teams.length < 2 || (tournament.status !== "FINISHED" && !tournament.matches.some((match: any) => match.status === "FINISHED" && match.teamA && match.teamB)), teamList: tournament.teams.map((team: any) => ({ id: team.id, name: displayName(team), playerOne: team.playerOne, playerTwo: team.playerTwo })),
+    teams: tournament.teams.length, canChangeStructure: management.canRemove, teamManagement: management, teamList: tournament.teams.map((team: any) => ({ id: team.id, name: displayName(team), playerOne: team.playerOne, playerTwo: team.playerTwo })),
     repechage: repechage(tournament), updatedAt: tournament.updatedAt,
     matches: tournament.matches.map((match: any) => ({ id: match.id, round: match.round, position: match.position, field: match.field, a: match.teamA ? displayName(match.teamA) : null, b: match.teamB ? displayName(match.teamB) : null, scoreA: match.scoreA, scoreB: match.scoreB, status: match.status, winner: match.winner ? displayName(match.winner) : null })),
   };
@@ -161,6 +181,95 @@ export async function generateDraw(tournamentId: string, drawMode: "PRELIMINARIE
     if (drawMode === "PRELIMINARIES") await advanceByes(tx, tournamentId);
     if (keepLive) await schedule(tx, tournamentId);
     return tx.tournament.update({ where: { id: tournamentId }, data: { status: keepLive ? "LIVE" : "READY", drawMode, startedAt: keepLive ? tournament.startedAt ?? new Date() : null, finishedAt: null, repechageFinalizedAt: null }, include: PUBLIC_INCLUDE });
+  }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+}
+
+
+export async function addTournamentTeam(tournamentId: string, values: { name: string; playerOne: string; playerTwo: string }) {
+  return prisma.$transaction(async tx => {
+    const tournament = await tx.tournament.findUnique({
+      where: { id: tournamentId },
+      include: { teams: true, matches: { orderBy: [{ round: "asc" }, { position: "asc" }] } }
+    });
+    if (!tournament) throw Error("Torneo non trovato");
+    if (tournament.status === "FINISHED") throw Error("Il torneo è concluso: puoi soltanto correggere i nominativi");
+    if (tournament.teams.length >= MAX_TEAMS) throw Error("Sono ammesse al massimo " + MAX_TEAMS + " coppie");
+
+    const hasPlayedMatch = tournament.matches.some(match => match.status === "FINISHED" && match.teamAId && match.teamBId);
+    const team = await tx.team.create({
+      data: { tournamentId, ...values },
+      select: { id: true, name: true, playerOne: true, playerTwo: true }
+    });
+
+    if (!hasPlayedMatch) {
+      if (tournament.status === "SETUP" || tournament.matches.length === 0) return { team, regenerated: false, placement: null };
+
+      const teams = [...tournament.teams, team];
+      const size = bracketSize(teams.length);
+      const slots = firstRoundSlots(shuffleItems(teams));
+      await tx.match.deleteMany({ where: { tournamentId } });
+      for (let round = 1; round <= Math.log2(size); round++) {
+        for (let position = 0; position < size / 2 ** round; position++) {
+          await tx.match.create({
+            data: {
+              tournamentId,
+              round,
+              position,
+              teamAId: round === 1 ? slots[position * 2]?.id ?? null : null,
+              teamBId: round === 1 ? slots[position * 2 + 1]?.id ?? null : null
+            }
+          });
+        }
+      }
+      if (tournament.drawMode === "PRELIMINARIES") await advanceByes(tx, tournamentId);
+      if (tournament.status === "LIVE") await schedule(tx, tournamentId);
+      await tx.tournament.update({
+        where: { id: tournamentId },
+        data: { finishedAt: null, repechageFinalizedAt: null }
+      });
+      return { team, regenerated: true, placement: null };
+    }
+
+    const lockedPlayoff = tournament.drawMode === "REPECHAGE" && (
+      Boolean(tournament.repechageFinalizedAt) ||
+      tournament.matches.some(match => match.round === 0 && ["LIVE", "FINISHED"].includes(match.status))
+    );
+    if (lockedPlayoff) throw Error("I ripescaggi sono già in corso: non è più possibile aggiungere una coppia senza alterare risultati validi");
+
+    const plan = lateEntryPlans(tournament.matches)[0];
+    if (!plan) throw Error("Non esiste uno slot libero sicuro: nessun risultato giocato verrà cancellato");
+
+    if (tournament.drawMode === "REPECHAGE") {
+      await tx.match.deleteMany({ where: { tournamentId, round: 0 } });
+    }
+
+    await tx.match.updateMany({
+      where: { tournamentId, id: { in: plan.resetMatchIds } },
+      data: { status: "SCHEDULED", field: null, scoreA: 0, scoreB: 0, winnerId: null, startedAt: null, finishedAt: null }
+    });
+    for (const clear of plan.clearSlots) {
+      await tx.match.update({ where: { id: clear.matchId }, data: { [clear.slot]: null } });
+    }
+    await tx.match.update({
+      where: { id: plan.matchId },
+      data: { [plan.openSlot]: team.id, status: "SCHEDULED", field: null, scoreA: 0, scoreB: 0, winnerId: null, startedAt: null, finishedAt: null }
+    });
+    await tx.tournament.update({
+      where: { id: tournamentId },
+      data: { status: "LIVE", finishedAt: null, repechageFinalizedAt: null }
+    });
+    await schedule(tx, tournamentId);
+
+    const opponent = tournament.teams.find(item => item.id === plan.opponentId);
+    return {
+      team,
+      regenerated: false,
+      placement: {
+        matchId: plan.matchId,
+        opponent: opponent ? displayName(opponent) : null,
+        reopenedMatches: plan.resetMatchIds.length
+      }
+    };
   }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
 }
 

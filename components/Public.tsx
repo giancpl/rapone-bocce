@@ -1,7 +1,7 @@
 "use client";
 
 import Image from "next/image";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import logo from "../logo-hd.png";
 
 const OFFICIAL_START = new Date("2026-08-13T16:00:00+02:00");
@@ -123,7 +123,7 @@ function roundName(round: number, total: number) {
   return remaining === 64 ? "32-esimi" : remaining === 32 ? "16-esimi" : remaining === 16 ? "Ottavi" : remaining === 8 ? "Quarti" : remaining === 4 ? "Semifinali" : "Finale";
 }
 
-function BracketGuide({ drawMode, matches }: { drawMode?: Tournament["drawMode"]; matches: Match[] }) { const active = matches.filter(match => match.status === "LIVE").length; const ready = matches.filter(match => ["READY", "WAITING"].includes(match.status)).length; return <div className="bracketGuide"><b>{drawMode === "REPECHAGE" ? "Formula con ripescaggi" : "Formula con preliminari"}</b><span>{drawMode === "REPECHAGE" ? "I preliminari producono la classifica delle migliori sconfitte; l’organizzazione completa poi gli abbinamenti." : "Le coppie senza avversario avanzano automaticamente al turno successivo."}</span><small>{active} in corso · {ready} in attesa</small></div>; }
+function BracketGuide({ drawMode, matches }: { drawMode?: Tournament["drawMode"]; matches: Match[] }) { const active = matches.filter(match => match.status === "LIVE").length; const ready = matches.filter(match => ["READY", "WAITING"].includes(match.status)).length; return <div className="bracketGuide"><b>{drawMode === "REPECHAGE" ? "Formula con ripescaggi" : "Formula con preliminari"}</b><span>{drawMode === "REPECHAGE" ? "I preliminari producono la classifica delle migliori sconfitte; il sistema completa gli abbinamenti e crea eventuali spareggi." : "Le coppie senza avversario avanzano automaticamente al turno successivo."}</span><small>{active} in corso · {ready} in attesa</small></div>; }
 
 function Bracket({ matches }: { matches: Match[] }) {
   const rounds = useMemo(() => [...new Set(matches.map(match => match.round))].sort((a, b) => a - b), [matches]);
@@ -133,7 +133,25 @@ function Bracket({ matches }: { matches: Match[] }) {
     const next = matches.find(match => ["LIVE", "WAITING", "READY", "SCHEDULED"].includes(match.status) && match.a && match.b)?.round;
     return live ?? next ?? rounds.at(-1) ?? rounds[0];
   }, [matches, rounds]);
-  return <div className="bracketExplorer"><div className="bracketCurrent"><span>Turno attuale</span><b>{currentRound ? roundName(currentRound, totalRounds) : "Tabellone"}</b><small>Scorri con il dito o il trackpad</small></div><div className="bracketScroll" tabIndex={0} aria-label="Tabellone a eliminazione diretta"><div className="bracket">{rounds.map(round => <div className={"bracketRound " + (round === currentRound ? "current" : "")} data-round={round} key={round}><div className="roundLabel"><span>{roundName(round, totalRounds)}</span><small>{matches.filter(match => match.round === round).length} incontri</small></div><div className="roundMatches">{matches.filter(match => match.round === round).map(match => <MatchCard key={match.id} match={match} bracket totalRounds={totalRounds} />)}</div></div>)}</div></div></div>;
+  const [selectedRound, setSelectedRound] = useState(currentRound);
+  const scrollRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => { if (currentRound !== undefined) setSelectedRound(currentRound); }, [currentRound]);
+
+  const selectRound = (round: number) => {
+    setSelectedRound(round);
+    if (window.matchMedia("(max-width: 700px)").matches) return;
+    window.requestAnimationFrame(() => {
+      const target = scrollRef.current?.querySelector<HTMLElement>("[data-round='" + round + "']");
+      if (target && scrollRef.current) scrollRef.current.scrollTo({ left: target.offsetLeft, behavior: "smooth" });
+    });
+  };
+
+  return <div className="bracketExplorer">
+    <div className="bracketCurrent"><span>Turno in evidenza</span><b>{selectedRound !== undefined ? roundName(selectedRound, totalRounds) : "Tabellone"}</b><small>Scegli un turno per raggiungerlo subito</small></div>
+    <div className="bracketRoundTabs" role="tablist" aria-label="Scegli il turno del tabellone">{rounds.map(round => <button type="button" role="tab" aria-selected={selectedRound === round} className={selectedRound === round ? "active" : ""} key={round} onClick={() => selectRound(round)}><span>{roundName(round, totalRounds)}</span><small>{matches.filter(match => match.round === round).length}</small></button>)}</div>
+    <div className="bracketScroll" ref={scrollRef} tabIndex={0} aria-label="Tabellone a eliminazione diretta"><div className="bracket">{rounds.map(round => <div className={"bracketRound " + (round === currentRound ? "current " : "") + (round === selectedRound ? "selected" : "")} data-round={round} key={round}><div className="roundLabel"><span>{roundName(round, totalRounds)}</span><small>{round === currentRound ? "Turno attuale" : matches.filter(match => match.round === round).length + " incontri"}</small></div><div className="roundMatches">{matches.filter(match => match.round === round).map(match => <MatchCard key={match.id} match={match} bracket totalRounds={totalRounds} />)}</div></div>)}</div></div>
+  </div>;
 }
 
 function ResultArchive({ matches, totalRounds }: { matches: Match[]; totalRounds: number }) {
@@ -148,8 +166,8 @@ function MatchCard({ match, prominent = false, compact = false, bracket = false,
   const label = isBye ? "Passaggio automatico" : match.status === "LIVE" ? "In corso" : ["WAITING", "READY", "SCHEDULED"].includes(match.status) ? "In attesa" : "Finita";
   const scoreA = match.status === "FINISHED" && !isBye ? match.scoreA : "-";
   const scoreB = match.status === "FINISHED" && !isBye ? match.scoreB : "-";
-  const destination = bracket && totalRounds ? match.round === 0 ? <>Vincente → <b>ripescaggio automatico</b></> : match.round === totalRounds ? "La coppia vincente diventa campione" : <>Coppia vincente → <b>{roundName(match.round + 1, totalRounds)}</b><em>slot {match.position % 2 === 0 ? "A" : "B"}</em></> : null;
-  return <article className={["matchCard", prominent ? "prominent" : "", compact ? "compact" : "", bracket ? "bracketCard" : "", isBye ? "bye" : "", match.status.toLowerCase()].join(" ")}><header><span>{label}</span><span className="matchRound">T{match.round}</span>{match.status === "LIVE" && <span className="liveDot">Live</span>}</header><div className={"teamLine " + (match.winner === match.a ? "winner" : "")}><b>{match.a || "Da definire"}</b><strong>{scoreA}</strong></div><div className={"teamLine " + (match.winner === match.b ? "winner" : "")}><b>{match.b || "Da definire"}</b><strong>{scoreB}</strong></div>{destination && <footer className="bracketPath">{destination}</footer>}</article>;
+  const destination = bracket && totalRounds ? match.round === 0 ? <>Vincente → <b>ripescaggio automatico</b></> : match.round === totalRounds ? "La coppia vincente diventa campione" : <>Vincente → <b>{roundName(match.round + 1, totalRounds)} · incontro {Math.floor(match.position / 2) + 1}</b><em>{match.position % 2 === 0 ? "posto superiore" : "posto inferiore"}</em></> : null;
+  return <article className={["matchCard", prominent ? "prominent" : "", compact ? "compact" : "", bracket ? "bracketCard" : "", isBye ? "bye" : "", match.status.toLowerCase()].join(" ")}><header><span>{label}</span><span className="matchRound">{match.round === 0 ? "Sp. " : "#"}{match.position + 1}</span>{match.status === "LIVE" && <span className="liveDot">Live</span>}</header><div className={"teamLine " + (match.winner === match.a ? "winner" : "")}><b>{match.a || "Da definire"}</b><strong>{scoreA}</strong></div><div className={"teamLine " + (match.winner === match.b ? "winner" : "")}><b>{match.b || "Da definire"}</b><strong>{scoreB}</strong></div>{destination && <footer className="bracketPath">{destination}</footer>}</article>;
 }
 
 function Empty({ text }: { text: string }) {
