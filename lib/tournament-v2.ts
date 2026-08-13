@@ -9,6 +9,29 @@ export const PUBLIC_INCLUDE = {
 
 const displayName = (team: { name: string; playerOne?: string | null; playerTwo?: string | null }) => team.playerOne && team.playerTwo ? `${team.playerOne} / ${team.playerTwo}` : team.name;
 
+const TRANSACTION_OPTIONS = {
+  isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
+  maxWait: 10_000,
+  timeout: 30_000,
+} as const;
+
+function bracketMatchRows(tournamentId: string, size: number, slots: Array<{ id: string } | null>, teamCount: number) {
+  const rows: Array<{ tournamentId: string; round: number; position: number; teamAId?: string | null; teamBId?: string | null }> = [];
+  for (let round = 1; round <= Math.log2(size); round++) {
+    for (let position = 0; position < size / 2 ** round; position++) {
+      rows.push({
+        tournamentId,
+        round,
+        position,
+        teamAId: round === 1 ? slots[position * 2]?.id ?? null : null,
+        teamBId: round === 1 ? slots[position * 2 + 1]?.id ?? null : null,
+      });
+    }
+  }
+  if (teamCount >= 4) rows.push({ tournamentId, round: Math.log2(size), position: 1 });
+  return rows;
+}
+
 export async function getTournamentSummary() {
   return prisma.tournament.findFirst({ orderBy: { createdAt: "desc" }, select: { id: true, status: true, drawMode: true, startedAt: true, finishedAt: true } });
 }
@@ -164,7 +187,9 @@ async function progressAutomaticRepechage(tx: any, tournamentId: string) {
     if (survivors.length > cutoff.remaining) {
       const pairs = repechagePlayoffWave(survivors, cutoff.remaining);
       const nextPosition = playoffs.reduce((max: number, match: any) => Math.max(max, match.position + 1), 0);
-      for (const [index, pair] of pairs.entries()) await tx.match.create({ data: { tournamentId, round: 0, position: nextPosition + index, teamAId: pair[0].id, teamBId: pair[1].id } });
+      await tx.match.createMany({
+        data: pairs.map((pair, index) => ({ tournamentId, round: 0, position: nextPosition + index, teamAId: pair[0].id, teamBId: pair[1].id }))
+      });
       await schedule(tx, tournamentId);
       return;
     }
@@ -183,7 +208,7 @@ async function progressAutomaticRepechage(tx: any, tournamentId: string) {
 
 
 export async function confirmAutomaticRepechage(tournamentId: string) {
-  return prisma.$transaction(async tx => progressAutomaticRepechage(tx, tournamentId), { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+  return prisma.$transaction(async tx => progressAutomaticRepechage(tx, tournamentId), TRANSACTION_OPTIONS);
 }
 
 export async function generateDraw(tournamentId: string, drawMode: "PRELIMINARIES" | "REPECHAGE" = "PRELIMINARIES", rebuild = false) {
@@ -201,12 +226,11 @@ export async function generateDraw(tournamentId: string, drawMode: "PRELIMINARIE
     const slots = drawMode === "REPECHAGE" ? repechageRoundSlots(shuffled) : firstRoundSlots(shuffled);
     const keepLive = rebuild && tournament.status === "LIVE";
     await tx.match.deleteMany({ where: { tournamentId } });
-    for (let round = 1; round <= Math.log2(size); round++) for (let position = 0; position < size / 2 ** round; position++) await tx.match.create({ data: { tournamentId, round, position, teamAId: round === 1 ? slots[position * 2]?.id ?? null : null, teamBId: round === 1 ? slots[position * 2 + 1]?.id ?? null : null } });
-    if (teams.length >= 4) await tx.match.create({ data: { tournamentId, round: Math.log2(size), position: 1 } });
+    await tx.match.createMany({ data: bracketMatchRows(tournamentId, size, slots, teams.length) });
     await advanceByes(tx, tournamentId);
     if (keepLive) await schedule(tx, tournamentId);
     return tx.tournament.update({ where: { id: tournamentId }, data: { status: keepLive ? "LIVE" : "READY", drawMode, startedAt: keepLive ? tournament.startedAt ?? new Date() : null, finishedAt: null, repechageFinalizedAt: null }, include: PUBLIC_INCLUDE });
-  }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+  }, TRANSACTION_OPTIONS);
 }
 
 
@@ -226,13 +250,15 @@ export async function generateTestTeams(tournamentId: string, count: number) {
       const last = TEST_LAST_NAMES[(index * 11 + Math.floor(index / TEST_FIRST_NAMES.length)) % TEST_LAST_NAMES.length];
       return first + " " + last + " · Test " + token + String(index + 1).padStart(2, "0");
     }));
-    const teams = [];
-    for (let index = 0; index < count; index++) {
+    const data = Array.from({ length: count }, (_, index) => {
       const playerOne = people[index * 2], playerTwo = people[index * 2 + 1];
-      teams.push(await tx.team.create({ data: { tournamentId, playerOne, playerTwo, name: playerOne + " / " + playerTwo }, select: { id: true, name: true, playerOne: true, playerTwo: true } }));
-    }
-    return teams;
-  }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+      return { tournamentId, playerOne, playerTwo, name: playerOne + " / " + playerTwo };
+    });
+    return tx.team.createManyAndReturn({
+      data,
+      select: { id: true, name: true, playerOne: true, playerTwo: true }
+    });
+  }, TRANSACTION_OPTIONS);
 }
 
 export async function addTournamentTeam(tournamentId: string, values: { name: string; playerOne: string; playerTwo: string }) {
@@ -259,20 +285,7 @@ export async function addTournamentTeam(tournamentId: string, values: { name: st
       const shuffled = shuffleItems(teams);
       const slots = tournament.drawMode === "REPECHAGE" ? repechageRoundSlots(shuffled) : firstRoundSlots(shuffled);
       await tx.match.deleteMany({ where: { tournamentId } });
-      for (let round = 1; round <= Math.log2(size); round++) {
-        for (let position = 0; position < size / 2 ** round; position++) {
-          await tx.match.create({
-            data: {
-              tournamentId,
-              round,
-              position,
-              teamAId: round === 1 ? slots[position * 2]?.id ?? null : null,
-              teamBId: round === 1 ? slots[position * 2 + 1]?.id ?? null : null
-            }
-          });
-        }
-      }
-      if (teams.length >= 4) await tx.match.create({ data: { tournamentId, round: Math.log2(size), position: 1 } });
+      await tx.match.createMany({ data: bracketMatchRows(tournamentId, size, slots, teams.length) });
       await advanceByes(tx, tournamentId);
       if (tournament.status === "LIVE") await schedule(tx, tournamentId);
       await tx.tournament.update({
@@ -322,7 +335,7 @@ export async function addTournamentTeam(tournamentId: string, values: { name: st
         reopenedMatches: plan.resetMatchIds.length
       }
     };
-  }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+  }, TRANSACTION_OPTIONS);
 }
 
 export async function regenerateDraw(tournamentId: string) {
@@ -344,7 +357,7 @@ export async function startTournament(tournamentId: string) {
     if (!tournament || tournament.status !== "READY") throw Error("Il torneo non è pronto");
     await schedule(tx, tournamentId);
     return tx.tournament.update({ where: { id: tournamentId }, data: { status: "LIVE", startedAt: new Date() } });
-  }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+  }, TRANSACTION_OPTIONS);
 }
 
 const validScore = assertBocceScore;
@@ -358,7 +371,7 @@ export async function updateMatchStatus(tournamentId: string, matchId: string, s
       if (occupied >= MAX_CONCURRENT_MATCHES) throw Error("Sono già presenti due incontri in corso: concludine uno prima di avviarne un altro");
     }
     await tx.match.update({ where: { id: match.id }, data: { status, field: null, startedAt: status === "LIVE" ? new Date() : null } });
-  }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+  }, TRANSACTION_OPTIONS);
 }
 
 export async function submitResult(tournamentId: string, matchId: string, scoreA: number, scoreB: number) {
@@ -377,7 +390,7 @@ export async function submitResult(tournamentId: string, matchId: string, scoreA
     const unfinished = await tx.match.count({ where: { tournamentId, status: { not: "FINISHED" } } });
     await tx.tournament.update({ where: { id: tournamentId }, data: unfinished ? {} : { status: "FINISHED", finishedAt: new Date() } });
     return result;
-  }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+  }, TRANSACTION_OPTIONS);
 }
 
 export async function resetTournament(tournamentId: string) {
@@ -388,7 +401,7 @@ export async function resetTournament(tournamentId: string) {
     await tx.registration.deleteMany({ where: { tournamentId } });
     await tx.team.deleteMany({ where: { tournamentId } });
     return tx.tournament.update({ where: { id: tournamentId }, data: { status: "SETUP", drawMode: "PRELIMINARIES", startedAt: null, finishedAt: null, repechageFinalizedAt: null } });
-  }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+  }, TRANSACTION_OPTIONS);
 }
 
 type CascadeMatch = { id: string; round: number; position: number; teamAId: string | null; teamBId: string | null; status: string };
@@ -492,5 +505,5 @@ export async function correctResult(tournamentId: string, matchId: string, score
       await tx.tournament.update({ where: { id: tournamentId }, data: { status: cascade.length ? "LIVE" : undefined, finishedAt: cascade.length ? null : undefined } });
     }
     return { affected: cascade.map((item: any) => item.id) };
-  }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+  }, TRANSACTION_OPTIONS);
 }
