@@ -1,4 +1,5 @@
 export const MAX_TEAMS = 64;
+export const MAX_CONCURRENT_MATCHES = 2;
 
 export function bracketSize(teamCount: number) {
   if (!Number.isInteger(teamCount) || teamCount < 2 || teamCount > MAX_TEAMS) {
@@ -146,6 +147,51 @@ export function lateEntryPlans(matches: LateEntryMatch[]): LateEntryPlan[] {
   }
 
   return plans.sort((a, b) => a.resetMatchIds.length - b.resetMatchIds.length || a.matchId.localeCompare(b.matchId));
+}
+
+
+export type DependencyMatch = { id: string; round: number; position: number };
+export type MatchDependency = {
+  fromId: string;
+  toId: string;
+  slot: "teamAId" | "teamBId";
+  outcome: "winner" | "loser";
+};
+
+export function matchDependencyGraph<T extends DependencyMatch>(matches: T[], sourceId: string) {
+  const mainRounds = matches.filter(match => match.round > 0);
+  const totalRounds = Math.max(0, ...mainRounds.map(match => match.round));
+  const byCoordinate = new Map(mainRounds.map(match => [match.round + ":" + match.position, match]));
+  const thirdPlace = byCoordinate.get(totalRounds + ":1");
+  const source = matches.find(match => match.id === sourceId);
+  if (!source || source.round <= 0) return { affected: [] as T[], edges: [] as MatchDependency[] };
+
+  const affected: T[] = [];
+  const affectedIds = new Set<string>();
+  const edges: MatchDependency[] = [];
+  const queue = [source];
+
+  while (queue.length) {
+    const current = queue.shift()!;
+    if (current.round >= totalRounds) continue;
+    const slot = current.position % 2 === 0 ? "teamAId" as const : "teamBId" as const;
+    const finalPath = byCoordinate.get((current.round + 1) + ":" + Math.floor(current.position / 2));
+    const outgoing: MatchDependency[] = [];
+    if (finalPath) outgoing.push({ fromId: current.id, toId: finalPath.id, slot, outcome: "winner" });
+    if (thirdPlace && current.round === totalRounds - 1) outgoing.push({ fromId: current.id, toId: thirdPlace.id, slot, outcome: "loser" });
+
+    for (const edge of outgoing) {
+      edges.push(edge);
+      const target = matches.find(match => match.id === edge.toId);
+      if (target && !affectedIds.has(target.id)) {
+        affectedIds.add(target.id);
+        affected.push(target);
+        queue.push(target);
+      }
+    }
+  }
+
+  return { affected, edges };
 }
 
 

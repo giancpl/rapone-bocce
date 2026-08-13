@@ -244,3 +244,15 @@ body{background:var(--paper)}body:before{display:none}.landing{background:#eef1e
   .matchStateActions{gap:4px}
   .matchStateActions button{padding:4px;font-size:10px}
 }
+
+
+/* Podio e doppio percorso delle semifinali */
+.podium{display:grid;grid-template-columns:minmax(190px,.7fr) minmax(0,1.5fr);gap:22px;align-items:center;margin:24px 0;padding:22px;border:1px solid #b8cbbc;border-radius:8px;background:#f7faf7}
+.podiumHeading h2{margin:5px 0 0;color:var(--ink);font-size:25px;line-height:1.1}
+.podiumPlaces{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:9px}
+.podiumPlace{display:flex;align-items:center;gap:10px;min-width:0;padding:12px;border:1px solid var(--line);border-radius:6px;background:#fff}
+.podiumPlace>span{display:grid;place-items:center;flex:none;width:34px;height:34px;border-radius:50%;background:#e6eee8;color:var(--green);font-size:16px;font-weight:900}
+.podiumPlace div{display:grid;min-width:0;gap:2px}.podiumPlace small{color:var(--muted);font-size:9px;font-weight:900;letter-spacing:.08em;text-transform:uppercase}.podiumPlace strong{overflow-wrap:anywhere;color:var(--ink);font-size:12px;line-height:1.25}.podiumPlace.place1{border-color:#91ad98}.podiumPlace.place1>span{background:var(--green);color:#fff}
+.bracketDualPath{display:grid;width:100%;gap:5px}.bracketDualPath>span{display:flex;align-items:center;gap:4px}.bracketDualPath>span+span{padding-top:5px;border-top:1px solid var(--line)}
+.matchRound{white-space:nowrap}.bracketCard:has(.matchRound:first-child){min-width:0}.simPlacement{display:block;margin:-11px -11px 9px;padding:7px 10px;border-bottom:1px solid var(--line);background:#f1f5f1;color:var(--green);font-size:9px;font-weight:900;letter-spacing:.07em;text-align:center;text-transform:uppercase}
+@media(max-width:760px){.podium{grid-template-columns:1fr;padding:16px}.podiumPlaces{grid-template-columns:1fr}.podiumPlace.place1{order:-1}.podiumHeading h2{font-size:22px}.bracketDualPath>span{align-items:flex-start;flex-wrap:wrap}}

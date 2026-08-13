@@ -3,19 +3,84 @@
 import Link from "next/link";
 import { useMemo, useState } from "react";
 import Public from "../../../components/Public";
-import { assertBocceScore, bracketSize, firstRoundSlots, MAX_TEAMS, nextMatchCoordinate, repechageCutoff, repechagePlan, repechagePlayoffWave, shuffleItems } from "../../../lib/bracket";
+import { assertBocceScore, bracketSize, firstRoundSlots, MAX_CONCURRENT_MATCHES, MAX_TEAMS, nextMatchCoordinate, repechageCutoff, repechagePlan, repechagePlayoffWave, shuffleItems } from "../../../lib/bracket";
 
 type Mode = "PRELIMINARIES" | "REPECHAGE";
 type Match = { id: string; round: number; position: number; a: string | null; b: string | null; scoreA?: number; scoreB?: number; winner?: string; bye?: boolean };
 type Score = { a: string; b: string };
-const roundName = (round: number, total: number) => { if (round === 0) return "Spareggi"; const remaining = 2 ** (total - round + 1); return remaining === 64 ? "32-esimi" : remaining === 32 ? "16-esimi" : remaining === 16 ? "Ottavi" : remaining === 8 ? "Quarti" : remaining === 4 ? "Semifinali" : "Finale"; };
+const roundName = (round: number, total: number) => { if (round === 0) return "Spareggi"; const remaining = 2 ** (total - round + 1); return remaining === 64 ? "32-esimi" : remaining === 32 ? "16-esimi" : remaining === 16 ? "Ottavi" : remaining === 8 ? "Quarti" : remaining === 4 ? "Semifinali" : "Finali"; };
 const copy = (matches: Match[]) => matches.map(match => ({ ...match }));
 const teamNames = (count: number) => Array.from({ length: count }, (_, index) => "Coppia " + (index + 1));
-const target = (matches: Match[], match: Match) => { const next = nextMatchCoordinate(match.round, match.position); return matches.find(item => item.round === next.round && item.position === next.position); };
-function place(matches: Match[], match: Match, winner: string) { const next = target(matches, match); if (!next) return; const coordinate = nextMatchCoordinate(match.round, match.position); next[coordinate.slot] = winner; }
-function settle(input: Match[], withByes: boolean) { const matches = copy(input); if (!withByes) return matches; let changed = true; while (changed) { changed = false; for (const match of matches) { if (match.winner !== undefined) continue; const previous = [matches.find(item => item.round === match.round - 1 && item.position === match.position * 2), matches.find(item => item.round === match.round - 1 && item.position === match.position * 2 + 1)]; if (match.round > 1 && !previous.every(item => item?.winner !== undefined)) continue; const winner = match.a || match.b; if (winner && !(match.a && match.b)) { Object.assign(match, { winner, bye: true }); place(matches, match, winner); changed = true; } } } return matches; }
-function build(count: number, mode: Mode) { const size = bracketSize(count), slots = firstRoundSlots(shuffleItems(teamNames(count))), matches: Match[] = []; for (let round = 1; round <= Math.log2(size); round++) for (let position = 0; position < size / 2 ** round; position++) matches.push({ id: round + "-" + position, round, position, a: round === 1 ? slots[position * 2] : null, b: round === 1 ? slots[position * 2 + 1] : null }); return settle(matches, mode === "PRELIMINARIES"); }
-function clearDescendants(input: Match[], source: Match) { const matches = copy(input); let current = matches.find(item => item.id === source.id); while (current) { const next = target(matches, current); if (!next) break; const coordinate = nextMatchCoordinate(current.round, current.position); next[coordinate.slot] = null; Object.assign(next, { winner: undefined, scoreA: undefined, scoreB: undefined, bye: false }); current = next; } return matches; }
+const target = (matches: Match[], match: Match) => {
+  const next = nextMatchCoordinate(match.round, match.position);
+  return matches.find(item => item.round === next.round && item.position === next.position);
+};
+const totalRound = (matches: Match[]) => Math.max(0, ...matches.filter(match => match.round > 0).map(match => match.round));
+function outgoing(matches: Match[], match: Match) {
+  if (match.round <= 0 || match.round >= totalRound(matches)) return [] as Array<{ match: Match; slot: "a" | "b"; outcome: "winner" | "loser" }>;
+  const coordinate = nextMatchCoordinate(match.round, match.position);
+  const next = target(matches, match);
+  const edges: Array<{ match: Match; slot: "a" | "b"; outcome: "winner" | "loser" }> = [];
+  if (next) edges.push({ match: next, slot: coordinate.slot, outcome: "winner" });
+  if (match.round === totalRound(matches) - 1) {
+    const third = matches.find(item => item.round === totalRound(matches) && item.position === 1);
+    if (third) edges.push({ match: third, slot: coordinate.slot, outcome: "loser" });
+  }
+  return edges;
+}
+function place(matches: Match[], match: Match, winner: string) {
+  const loser = winner === match.a ? match.b : match.a;
+  for (const edge of outgoing(matches, match)) {
+    const participant = edge.outcome === "winner" ? winner : loser;
+    if (participant) edge.match[edge.slot] = participant;
+  }
+}
+function settle(input: Match[], withByes: boolean) {
+  const matches = copy(input);
+  if (!withByes) return matches;
+  let changed = true;
+  while (changed) {
+    changed = false;
+    const lastRound = totalRound(matches);
+    for (const match of matches) {
+      if (match.winner !== undefined || match.round === lastRound && match.position === 1) continue;
+      const previous = [matches.find(item => item.round === match.round - 1 && item.position === match.position * 2), matches.find(item => item.round === match.round - 1 && item.position === match.position * 2 + 1)];
+      if (match.round > 1 && !previous.every(item => item?.winner !== undefined)) continue;
+      const winner = match.a || match.b;
+      if (winner && !(match.a && match.b)) {
+        Object.assign(match, { winner, bye: true });
+        place(matches, match, winner);
+        changed = true;
+      }
+    }
+  }
+  return matches;
+}
+function build(count: number, mode: Mode) {
+  const size = bracketSize(count), slots = firstRoundSlots(shuffleItems(teamNames(count))), matches: Match[] = [];
+  const rounds = Math.log2(size);
+  for (let round = 1; round <= rounds; round++) for (let position = 0; position < size / 2 ** round; position++) matches.push({ id: round + "-" + position, round, position, a: round === 1 ? slots[position * 2] : null, b: round === 1 ? slots[position * 2 + 1] : null });
+  if (count >= 4) matches.push({ id: rounds + "-third", round: rounds, position: 1, a: null, b: null });
+  return settle(matches, mode === "PRELIMINARIES");
+}
+function clearDescendants(input: Match[], source: Match) {
+  const matches = copy(input);
+  const start = matches.find(item => item.id === source.id);
+  if (!start) return matches;
+  const queue = [start], visited = new Set<string>();
+  while (queue.length) {
+    const current = queue.shift()!;
+    for (const edge of outgoing(matches, current)) {
+      edge.match[edge.slot] = null;
+      Object.assign(edge.match, { winner: undefined, scoreA: undefined, scoreB: undefined, bye: false });
+      if (!visited.has(edge.match.id)) {
+        visited.add(edge.match.id);
+        queue.push(edge.match);
+      }
+    }
+  }
+  return matches;
+}
 function candidates(matches: Match[], preliminaryIds?: Set<string>) { return matches.filter(match => match.round === 1 && (!preliminaryIds || preliminaryIds.has(match.id)) && match.winner && !match.bye && match.a && match.b).map(match => { const loser = match.winner === match.a ? match.b! : match.a!; const scored = match.winner === match.a ? match.scoreB! : match.scoreA!; const conceded = match.winner === match.a ? match.scoreA! : match.scoreB!; return { id: loser, name: loser, scored, conceded, difference: scored - conceded }; }).sort((a, b) => b.difference - a.difference || b.scored - a.scored || a.name.localeCompare(b.name)); }
 function progressSimulatedRepechage(input: Match[], count: number, preliminaryIds: Set<string>) {
   const plan = repechagePlan(count), ranked = candidates(input, preliminaryIds);
@@ -82,9 +147,9 @@ export default function Simulation() {
   const simulate = (match: Match) => finish(match, 11 + (match.position + match.round) % 4, (match.position * 3 + match.round) % 11);
   const rounds = [...new Set(matches.map(match => match.round))];
   const ready = useMemo(() => matches.filter(match => !match.winner && match.a && match.b).sort((a, b) => a.round - b.round || a.position - b.position), [matches]);
-  const liveIds = new Set(ready.slice(0, 2).map(match => match.id));
+  const liveIds = new Set(ready.slice(0, MAX_CONCURRENT_MATCHES).map(match => match.id));
   const plan = repechagePlan(count), rankedLosers = candidates(matches, preliminaryIds), playoffMatches = matches.filter(match => match.round === 0), completedPreliminaries = matches.filter(match => match.round === 1 && match.winner && !match.bye).length;
   const publicState = matches.length ? { name: "Torneo di Bocce", edition: "51° edizione · PROVA", status: matches.every(match => match.winner) ? "FINISHED" as const : "LIVE" as const, teams: count, updatedAt: new Date().toISOString(), matches: matches.map(match => ({ id: match.id, round: match.round, position: match.position, field: null, a: match.a, b: match.b, scoreA: match.scoreA || 0, scoreB: match.scoreB || 0, status: match.winner ? "FINISHED" as const : liveIds.has(match.id) ? "LIVE" as const : "SCHEDULED" as const, winner: match.winner || null })) } : null;
   if (view === "public" && publicState) return <><div className="previewDock"><b>Anteprima pubblica · dati isolati</b><button className="minorButton" onClick={() => setView("control")}>Torna ai controlli</button></div><Public key={JSON.stringify(matches)} initial={publicState} preview /></>;
-  return <main className="simulation"><header className="adminHeader"><div><p className="kicker">Ambiente isolato</p><h1>Simulatore torneo</h1></div><Link className="minorButton" href="/admin">← Torna alla regia</Link></header><section className="simulationHero"><div><p className="kicker">Stesse regole, nessun dato reale</p><h2>Prova un torneo completo</h2><p>Bye, risultati e ripescaggi seguono le regole del torneo ufficiale.</p></div><div className="simControls"><label className="teamStepper">Coppie<div><button type="button" aria-label="Diminuisci coppie" onClick={() => setCount(count - 1)}>−</button><input type="number" min="2" max={MAX_TEAMS} step="1" inputMode="numeric" value={countInput} onChange={event => setCountInput(event.target.value)} onBlur={() => setCount(count)} /><button type="button" aria-label="Aumenta coppie" onClick={() => setCount(count + 1)}>+</button></div></label><label>Formula<select value={mode} onChange={event => setMode(event.target.value as Mode)}><option value="PRELIMINARIES">Preliminari</option><option value="REPECHAGE">Ripescaggi</option></select></label><button className="primaryButton" onClick={generate}>Genera prova</button>{matches.length > 0 && <button className="minorButton" onClick={() => setView("public")}>Vista pubblica</button>}{matches.length > 0 && <button className="textButton testReset" onClick={reset}>Azzera</button>}</div></section>{message && <p className="notice">{message}</p>}{mode === "REPECHAGE" && plan.selections > 0 && matches.length > 0 && !repechageFinalized && <section className="adminPanel simulationRepechage"><div className="sectionHeading"><div><p className="kicker">Ripescaggi automatici</p><h2>{playoffMatches.length ? "Spareggi per la parità" : completedPreliminaries === plan.preliminaryMatches ? "Calcolo della classifica" : "In attesa dei preliminari"}</h2></div><span className="muted">{completedPreliminaries + " di " + plan.preliminaryMatches + " preliminari conclusi"}</span></div><p className="muted">Differenza punti e punti segnati determinano i ripescati. Solo la parità sulla soglia genera spareggi.</p>{rankedLosers.length > 0 && <div className="repechageRanking">{rankedLosers.map((team, index) => <div key={team.name}><span>#{index + 1}</span><b>{team.name}</b><small>{team.scored}–{team.conceded} · diff. {team.difference}</small></div>)}</div>}{playoffMatches.length > 0 && <div className="playoffSummary">{playoffMatches.map(match => <div key={match.id}><span>{match.winner ? "Finita" : liveIds.has(match.id) ? "In corso" : "In attesa"}</span><b>{match.a} – {match.b}</b>{match.winner && <small>Vince {match.winner}</small>}</div>)}</div>}</section>}{!matches.length ? <div className="emptyState">Scegli numero di coppie e formula per generare una prova.</div> : <section className="adminPanel"><div className="sectionHeading"><div><p className="kicker">Tabellone di prova</p><h2>Regia incontri</h2></div><span className="muted">Gli incontri pronti compaiono automaticamente qui.</span></div><div className="simulationBoard">{rounds.map(round => <div className="simRound" key={round}><h3>{roundName(round, Math.max(0, ...rounds))}</h3>{matches.filter(match => match.round === round).map(match => { const score = scores[match.id] || { a: "", b: "" }; return <article className="simMatch manual" key={match.id}><input aria-label="Prima coppia" readOnly={match.round === 0} value={match.a || ""} placeholder="Da definire" onChange={event => updateMatch(match.id, "a", event.target.value)} /><strong>{match.winner ? (match.bye ? "Bye" : match.scoreA + " – " + match.scoreB) : liveIds.has(match.id) ? "In corso" : "—"}</strong><input aria-label="Seconda coppia" readOnly={match.round === 0} value={match.b || ""} placeholder="Da definire" onChange={event => updateMatch(match.id, "b", event.target.value)} />{match.a && match.b && !match.winner && <div className="simResult"><input aria-label="Punteggio prima coppia" type="number" min="0" max="14" placeholder="0" value={score.a} onChange={event => setScores(current => ({ ...current, [match.id]: { ...score, a: event.target.value } }))} /><span>–</span><input aria-label="Punteggio seconda coppia" type="number" min="0" max="14" placeholder="0" value={score.b} onChange={event => setScores(current => ({ ...current, [match.id]: { ...score, b: event.target.value } }))} /><button className="minorButton" onClick={() => finish(match, Number(score.a), Number(score.b))}>Registra</button><button className="textButton" onClick={() => simulate(match)}>Simula</button></div>}{match.winner && !match.bye && <button className="textButton simEdit" onClick={() => reopenResult(match)}>Modifica risultato</button>}</article>; })}</div>)}</div></section>}</main>;
+  return <main className="simulation"><header className="adminHeader"><div><p className="kicker">Ambiente isolato</p><h1>Simulatore torneo</h1></div><Link className="minorButton" href="/admin">← Torna alla regia</Link></header><section className="simulationHero"><div><p className="kicker">Stesse regole, nessun dato reale</p><h2>Prova un torneo completo</h2><p>Bye, risultati e ripescaggi seguono le regole del torneo ufficiale.</p></div><div className="simControls"><label className="teamStepper">Coppie<div><button type="button" aria-label="Diminuisci coppie" onClick={() => setCount(count - 1)}>−</button><input type="number" min="2" max={MAX_TEAMS} step="1" inputMode="numeric" value={countInput} onChange={event => setCountInput(event.target.value)} onBlur={() => setCount(count)} /><button type="button" aria-label="Aumenta coppie" onClick={() => setCount(count + 1)}>+</button></div></label><label>Formula<select value={mode} onChange={event => setMode(event.target.value as Mode)}><option value="PRELIMINARIES">Preliminari</option><option value="REPECHAGE">Ripescaggi</option></select></label><button className="primaryButton" onClick={generate}>Genera prova</button>{matches.length > 0 && <button className="minorButton" onClick={() => setView("public")}>Vista pubblica</button>}{matches.length > 0 && <button className="textButton testReset" onClick={reset}>Azzera</button>}</div></section>{message && <p className="notice">{message}</p>}{mode === "REPECHAGE" && plan.selections > 0 && matches.length > 0 && !repechageFinalized && <section className="adminPanel simulationRepechage"><div className="sectionHeading"><div><p className="kicker">Ripescaggi automatici</p><h2>{playoffMatches.length ? "Spareggi per la parità" : completedPreliminaries === plan.preliminaryMatches ? "Calcolo della classifica" : "In attesa dei preliminari"}</h2></div><span className="muted">{completedPreliminaries + " di " + plan.preliminaryMatches + " preliminari conclusi"}</span></div><p className="muted">Differenza punti e punti segnati determinano i ripescati. Solo la parità sulla soglia genera spareggi.</p>{rankedLosers.length > 0 && <div className="repechageRanking">{rankedLosers.map((team, index) => <div key={team.name}><span>#{index + 1}</span><b>{team.name}</b><small>{team.scored}–{team.conceded} · diff. {team.difference}</small></div>)}</div>}{playoffMatches.length > 0 && <div className="playoffSummary">{playoffMatches.map(match => <div key={match.id}><span>{match.winner ? "Finita" : liveIds.has(match.id) ? "In corso" : "In attesa"}</span><b>{match.a} – {match.b}</b>{match.winner && <small>Vince {match.winner}</small>}</div>)}</div>}</section>}{!matches.length ? <div className="emptyState">Scegli numero di coppie e formula per generare una prova.</div> : <section className="adminPanel"><div className="sectionHeading"><div><p className="kicker">Tabellone di prova</p><h2>Regia incontri</h2></div><span className="muted">Gli incontri pronti compaiono automaticamente qui.</span></div><div className="simulationBoard">{rounds.map(round => <div className="simRound" key={round}><h3>{roundName(round, Math.max(0, ...rounds))}</h3>{matches.filter(match => match.round === round).map(match => { const score = scores[match.id] || { a: "", b: "" }; return <article className="simMatch manual" key={match.id}>{round === Math.max(0, ...rounds) && <small className="simPlacement">{match.position === 0 ? "Finale 1°/2° posto" : "Finale 3°/4° posto"}</small>}<input aria-label="Prima coppia" readOnly={match.round === 0} value={match.a || ""} placeholder="Da definire" onChange={event => updateMatch(match.id, "a", event.target.value)} /><strong>{match.winner ? (match.bye ? "Bye" : match.scoreA + " – " + match.scoreB) : liveIds.has(match.id) ? "In corso" : "—"}</strong><input aria-label="Seconda coppia" readOnly={match.round === 0} value={match.b || ""} placeholder="Da definire" onChange={event => updateMatch(match.id, "b", event.target.value)} />{match.a && match.b && !match.winner && <div className="simResult"><input aria-label="Punteggio prima coppia" type="number" min="0" max="14" placeholder="0" value={score.a} onChange={event => setScores(current => ({ ...current, [match.id]: { ...score, a: event.target.value } }))} /><span>–</span><input aria-label="Punteggio seconda coppia" type="number" min="0" max="14" placeholder="0" value={score.b} onChange={event => setScores(current => ({ ...current, [match.id]: { ...score, b: event.target.value } }))} /><button className="minorButton" onClick={() => finish(match, Number(score.a), Number(score.b))}>Registra</button><button className="textButton" onClick={() => simulate(match)}>Simula</button></div>}{match.winner && !match.bye && <button className="textButton simEdit" onClick={() => reopenResult(match)}>Modifica risultato</button>}</article>; })}</div>)}</div></section>}</main>;
 }

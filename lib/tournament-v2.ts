@@ -1,6 +1,6 @@
 import { Prisma } from "../app/generated/prisma/client";
 import { prisma } from "./db";
-import { assertBocceScore, bracketSize, cascadeCoordinates, firstRoundSlots, lateEntryPlans, MAX_TEAMS, repechageCutoff, repechagePlan, repechagePlayoffWave, shuffleItems } from "./bracket";
+import { assertBocceScore, bracketSize, firstRoundSlots, matchDependencyGraph, lateEntryPlans, MAX_CONCURRENT_MATCHES, MAX_TEAMS, repechageCutoff, repechagePlan, repechagePlayoffWave, shuffleItems } from "./bracket";
 
 export const PUBLIC_INCLUDE = {
   matches: { orderBy: [{ round: "asc" as const }, { position: "asc" as const }], include: { teamA: true, teamB: true, winner: true } },
@@ -92,12 +92,26 @@ async function advance(tx: any, tournamentId: string, round: number, position: n
   return true;
 }
 
+
+async function advanceResult(tx: any, tournamentId: string, match: { round: number; position: number; teamAId: string | null; teamBId: string | null }, winnerId: string) {
+  await advance(tx, tournamentId, match.round, match.position, winnerId);
+  const last = await tx.match.findFirst({ where: { tournamentId, round: { gt: 0 } }, orderBy: { round: "desc" }, select: { round: true } });
+  if (!last || match.round !== last.round - 1) return;
+  const thirdPlace = await tx.match.findUnique({ where: { tournamentId_round_position: { tournamentId, round: last.round, position: 1 } } });
+  if (!thirdPlace) return;
+  const loserId = winnerId === match.teamAId ? match.teamBId : match.teamAId;
+  if (!loserId) return;
+  await tx.match.update({ where: { id: thirdPlace.id }, data: { [match.position % 2 === 0 ? "teamAId" : "teamBId"]: loserId } });
+}
+
 async function advanceByes(tx: any, tournamentId: string) {
   let changed = true;
   while (changed) {
     changed = false;
     const matches = await tx.match.findMany({ where: { tournamentId, status: "SCHEDULED" }, orderBy: [{ round: "asc" }, { position: "asc" }] });
+    const lastRound = Math.max(0, ...matches.map((match: any) => match.round));
     for (const match of matches) {
+      if (match.round === lastRound && match.position === 1) continue;
       const winnerId = match.teamAId ?? match.teamBId;
       if (!winnerId || (match.teamAId && match.teamBId)) continue;
       if (match.round > 1) {
@@ -178,6 +192,7 @@ export async function generateDraw(tournamentId: string, drawMode: "PRELIMINARIE
     const keepLive = rebuild && tournament.status === "LIVE";
     await tx.match.deleteMany({ where: { tournamentId } });
     for (let round = 1; round <= Math.log2(size); round++) for (let position = 0; position < size / 2 ** round; position++) await tx.match.create({ data: { tournamentId, round, position, teamAId: round === 1 ? slots[position * 2]?.id ?? null : null, teamBId: round === 1 ? slots[position * 2 + 1]?.id ?? null : null } });
+    if (teams.length >= 4) await tx.match.create({ data: { tournamentId, round: Math.log2(size), position: 1 } });
     if (drawMode === "PRELIMINARIES") await advanceByes(tx, tournamentId);
     if (keepLive) await schedule(tx, tournamentId);
     return tx.tournament.update({ where: { id: tournamentId }, data: { status: keepLive ? "LIVE" : "READY", drawMode, startedAt: keepLive ? tournament.startedAt ?? new Date() : null, finishedAt: null, repechageFinalizedAt: null }, include: PUBLIC_INCLUDE });
@@ -221,6 +236,7 @@ export async function addTournamentTeam(tournamentId: string, values: { name: st
           });
         }
       }
+      if (teams.length >= 4) await tx.match.create({ data: { tournamentId, round: Math.log2(size), position: 1 } });
       if (tournament.drawMode === "PRELIMINARIES") await advanceByes(tx, tournamentId);
       if (tournament.status === "LIVE") await schedule(tx, tournamentId);
       await tx.tournament.update({
@@ -303,7 +319,7 @@ export async function updateMatchStatus(tournamentId: string, matchId: string, s
     if (!match || !match.teamAId || !match.teamBId || match.status === "FINISHED") throw Error("Stato incontro non modificabile");
     if (status === "LIVE") {
       const occupied = await tx.match.count({ where: { tournamentId, status: "LIVE", id: { not: match.id } } });
-      if (occupied >= 2) throw Error("Sono già presenti due incontri in corso: concludine uno prima di avviarne un altro");
+      if (occupied >= MAX_CONCURRENT_MATCHES) throw Error("Sono già presenti due incontri in corso: concludine uno prima di avviarne un altro");
     }
     await tx.match.update({ where: { id: match.id }, data: { status, field: null, startedAt: status === "LIVE" ? new Date() : null } });
   }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
@@ -319,7 +335,7 @@ export async function submitResult(tournamentId: string, matchId: string, scoreA
     const winnerId = scoreA > scoreB ? match.teamAId : match.teamBId;
     if (!winnerId) throw Error("Coppia vincente non valida");
     const result = await tx.match.update({ where: { id: match.id }, data: { scoreA, scoreB, winnerId, status: "FINISHED", field: null, finishedAt: new Date() } });
-    if (match.round > 0) await advance(tx, tournamentId, match.round, match.position, winnerId);
+    if (match.round > 0) await advanceResult(tx, tournamentId, match, winnerId);
     if (tournament.drawMode === "PRELIMINARIES") await advanceByes(tx, tournamentId);
     if (tournament.drawMode === "REPECHAGE") await progressAutomaticRepechage(tx, tournamentId);
     await schedule(tx, tournamentId);
@@ -341,11 +357,8 @@ export async function resetTournament(tournamentId: string) {
 }
 
 type CascadeMatch = { id: string; round: number; position: number; teamAId: string | null; teamBId: string | null; status: string };
-function cascadeFrom(matches: CascadeMatch[], match: CascadeMatch) {
-  const lastRound = Math.max(...matches.map(item => item.round));
-  return cascadeCoordinates(match.round, match.position, lastRound)
-    .map(coordinate => matches.find(item => item.round === coordinate.round && item.position === coordinate.position))
-    .filter((item): item is CascadeMatch => Boolean(item));
+function dependenciesFrom(matches: CascadeMatch[], match: CascadeMatch) {
+  return matchDependencyGraph(matches, match.id);
 }
 
 function originalPreliminaries(tournament: any) {
@@ -395,7 +408,7 @@ async function restartRepechageAfterCorrection(tx: any, tournament: any, source:
 
   for (const match of originals) {
     const originalWinner = match.id === source.id ? winnerId : match.winnerId;
-    if (originalWinner) await advance(tx, tournament.id, match.round, match.position, originalWinner);
+    if (originalWinner) await advanceResult(tx, tournament.id, match, originalWinner);
   }
   await progressAutomaticRepechage(tx, tournament.id);
   await schedule(tx, tournament.id);
@@ -408,7 +421,8 @@ export async function previewCorrection(tournamentId: string, matchId: string, s
   if (!tournament || !match || match.status !== "FINISHED" || !match.teamAId || !match.teamBId) throw Error("Risultato non modificabile");
   const winnerId = scoreA > scoreB ? match.teamAId : match.teamBId;
   const repechageImpact = repechageCorrectionImpact(tournament, match, scoreA, scoreB);
-  const cascade = repechageImpact ? repechageImpact.affected : winnerId !== match.winnerId ? cascadeFrom(tournament.matches, match) : [];
+  const dependency = dependenciesFrom(tournament.matches, match);
+  const cascade = repechageImpact ? repechageImpact.affected : winnerId !== match.winnerId ? dependency.affected : [];
   return {
     changesWinner: winnerId !== match.winnerId,
     restartsRepechage: Boolean(repechageImpact),
@@ -424,7 +438,8 @@ export async function correctResult(tournamentId: string, matchId: string, score
     if (!tournament || !match || match.status !== "FINISHED" || !match.teamAId || !match.teamBId) throw Error("Risultato non modificabile");
     const winnerId = scoreA > scoreB ? match.teamAId : match.teamBId;
     const repechageImpact = repechageCorrectionImpact(tournament, match, scoreA, scoreB);
-    const cascade = repechageImpact ? repechageImpact.affected : winnerId !== match.winnerId ? cascadeFrom(tournament.matches, match) : [];
+    const dependency = dependenciesFrom(tournament.matches, match);
+    const cascade = repechageImpact ? repechageImpact.affected : winnerId !== match.winnerId ? dependency.affected : [];
     if (cascade.length && !confirmCascade) throw Error("Conferma necessaria per riaprire gli incontri successivi");
 
     if (repechageImpact) {
@@ -433,10 +448,10 @@ export async function correctResult(tournamentId: string, matchId: string, score
       await tx.match.update({ where: { id: match.id }, data: { scoreA, scoreB, winnerId } });
       if (cascade.length) {
         for (const item of cascade) await tx.match.update({ where: { id: item.id }, data: { status: "SCHEDULED", field: null, scoreA: 0, scoreB: 0, winnerId: null, startedAt: null, finishedAt: null } });
-        for (const [index, item] of cascade.entries()) {
-          const previous = index === 0 ? match : cascade[index - 1];
-          const slot = previous.position % 2 === 0 ? "teamAId" : "teamBId";
-          await tx.match.update({ where: { id: item.id }, data: { [slot]: index === 0 ? winnerId : null } });
+        const loserId = winnerId === match.teamAId ? match.teamBId : match.teamAId;
+        for (const edge of dependency.edges) {
+          const participantId = edge.fromId === match.id ? (edge.outcome === "winner" ? winnerId : loserId) : null;
+          await tx.match.update({ where: { id: edge.toId }, data: { [edge.slot]: participantId } });
         }
         await schedule(tx, tournamentId);
       }

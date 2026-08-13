@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { assertBocceScore, bracketSize, cascadeCoordinates, firstRoundSlots, MAX_TEAMS, nextMatchCoordinate, lateEntryPlans, repechageCutoff, repechagePlan, repechagePlayoffWave, shuffleItems } from "../lib/bracket.ts";
+import { assertBocceScore, bracketSize, cascadeCoordinates, firstRoundSlots, MAX_CONCURRENT_MATCHES, MAX_TEAMS, nextMatchCoordinate, lateEntryPlans, matchDependencyGraph, repechageCutoff, repechagePlan, repechagePlayoffWave, shuffleItems } from "../lib/bracket.ts";
 
 test("every supported team count creates a traversable first round", () => {
   for (let count = 2; count <= MAX_TEAMS; count++) {
@@ -18,6 +18,10 @@ test("invalid team counts and bocce scores are rejected", () => {
   for (const score of [[10, 0], [11, 11], [15, 2], [-1, 11], [11.5, 2]]) assert.throws(() => assertBocceScore(score[0], score[1]));
   assert.doesNotThrow(() => assertBocceScore(11, 0));
   assert.doesNotThrow(() => assertBocceScore(14, 13));
+});
+
+test("at most two matches can run concurrently", () => {
+  assert.equal(MAX_CONCURRENT_MATCHES, 2);
 });
 
 test("next slots remain deterministic", () => {
@@ -142,4 +146,24 @@ test("late entries safely reopen chains made only of automatic byes", () => {
   assert.deepEqual(lateEntryPlans([{ id: "open", round: 1, position: 2, teamAId: null, teamBId: "D", winnerId: null, status: "SCHEDULED" }])[0], {
     matchId: "open", openSlot: "teamAId", opponentId: "D", resetMatchIds: ["open"], clearSlots: []
   });
+});
+
+
+test("semifinals feed winners to the final and losers to the third-place match", () => {
+  const matches = [
+    { id: "quarter", round: 1, position: 0 },
+    { id: "semi-a", round: 2, position: 0 },
+    { id: "semi-b", round: 2, position: 1 },
+    { id: "final", round: 3, position: 0 },
+    { id: "third", round: 3, position: 1 }
+  ];
+  const semifinal = matchDependencyGraph(matches, "semi-a");
+  assert.deepEqual(semifinal.affected.map(match => match.id), ["final", "third"]);
+  assert.deepEqual(semifinal.edges, [
+    { fromId: "semi-a", toId: "final", slot: "teamAId", outcome: "winner" },
+    { fromId: "semi-a", toId: "third", slot: "teamAId", outcome: "loser" }
+  ]);
+  const quarter = matchDependencyGraph(matches, "quarter");
+  assert.deepEqual(quarter.affected.map(match => match.id), ["semi-a", "final", "third"]);
+  assert.equal(quarter.edges.filter(edge => edge.toId === "third").length, 1);
 });
