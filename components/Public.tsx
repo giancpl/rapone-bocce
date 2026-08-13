@@ -1,6 +1,7 @@
 "use client";
 
 import Image from "next/image";
+import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import logo from "../logo-hd.png";
 
@@ -66,11 +67,11 @@ export default function Public({ initial, preview = false }: { initial: Tourname
   };
 
   if (!tournament) {
-    return <main className="landing"><div className="landingCard"><LandingTop /><p className="kicker">51° edizione</p><h1>Torneo di Bocce</h1><p>Le iscrizioni e il tabellone saranno disponibili qui a breve.</p>{error && <p className="softError">{error}</p>}</div></main>;
+    return <main className="landing"><div className="landingCard"><LandingTop /><p className="kicker">51° edizione</p><h1>Torneo di Bocce</h1><p>Le iscrizioni e il tabellone saranno disponibili qui a breve.</p>{error && <p className="softError">{error}</p>}<Link className="landingRulesLink" href="/regolamento">Consulta il regolamento →</Link></div></main>;
   }
 
   if (tournament.status === "SETUP") {
-    return <main className="landing"><div className="landingCard registrationLanding"><LandingTop /><p className="kicker">51° edizione</p><h1>Torneo di Bocce</h1><p>Iscrivi la tua coppia: la richiesta sarà verificata dall'organizzazione prima del sorteggio.</p><RegistrationForm playerOne={playerOne} playerTwo={playerTwo} setPlayerOne={setPlayerOne} setPlayerTwo={setPlayerTwo} submit={requestRegistration} sending={sending} message={registrationMessage} />{error && <p className="softError">{error}</p>}</div></main>;
+    return <main className="landing"><div className="landingCard registrationLanding"><LandingTop /><p className="kicker">51° edizione</p><h1>Torneo di Bocce</h1><p>Iscrivi la tua coppia: la richiesta sarà verificata dall'organizzazione prima del sorteggio.</p><RegistrationForm playerOne={playerOne} playerTwo={playerTwo} setPlayerOne={setPlayerOne} setPlayerTwo={setPlayerTwo} submit={requestRegistration} sending={sending} message={registrationMessage} />{error && <p className="softError">{error}</p>}<Link className="landingRulesLink" href="/regolamento">Consulta il regolamento →</Link></div></main>;
   }
 
   const live = tournament.matches.filter(match => match.status === "LIVE");
@@ -87,7 +88,7 @@ export default function Public({ initial, preview = false }: { initial: Tourname
     ...(thirdPlaceMatch?.winner ? [{ place: 3, label: "3° posto", name: thirdPlaceMatch.winner }] : [])
   ] : [];
 
-  return <main className="publicApp"><PublicHero tournament={tournament} live={live.length} next={next.length} completed={completed.length} totalRounds={totalRounds} />{podium.length > 0 && <Podium entries={podium} />}<nav className="sectionNav" aria-label="Navigazione torneo"><a href="#incontri">Incontri{live.length ? <b>{live.length}</b> : null}</a><a href="#tabellone">Tabellone</a><a href="#risultati">Risultati{completed.length ? <b>{completed.length}</b> : null}</a></nav>{error && <p className="softError">Aggiornamento al prossimo tentativo: {error}</p>}<MatchHighlights active={active} next={next} totalRounds={totalRounds} hasThirdPlace={Boolean(thirdPlaceMatch || tournament.matches.some(match => match.round === totalRounds && match.position === 1))} /><section className="boardSection bracketSection" id="tabellone"><div className="sectionHeading"><div><p className="kicker">Tabellone</p><h2>Verso le finali</h2></div><span className="muted">Scegli un turno per seguire tutti gli abbinamenti</span></div><BracketGuide drawMode={tournament.drawMode} matches={tournament.matches} /><Bracket matches={tournament.matches} /></section><section className="boardSection" id="risultati"><div className="sectionHeading"><div><p className="kicker">Archivio</p><h2>Risultati</h2></div><span className="muted">{completed.length} incontri conclusi</span></div><ResultArchive matches={completed} totalRounds={totalRounds} /></section><footer className="siteFooter">Aggiornato alle {new Date(tournament.updatedAt).toLocaleTimeString("it-IT", { hour: "2-digit", minute: "2-digit" })}</footer></main>;
+  return <main className="publicApp"><PublicHero tournament={tournament} live={live.length} next={next.length} completed={completed.length} totalRounds={totalRounds} />{podium.length > 0 && <Podium entries={podium} />}<nav className="sectionNav" aria-label="Navigazione torneo"><a href="#incontri">Incontri{live.length ? <b>{live.length}</b> : null}</a><a href="#tabellone">Tabellone</a><a href="#risultati">Risultati{completed.length ? <b>{completed.length}</b> : null}</a><Link href="/regolamento">Regolamento</Link></nav>{error && <p className="softError">Aggiornamento al prossimo tentativo: {error}</p>}<MatchHighlights active={active} next={next} totalRounds={totalRounds} hasThirdPlace={Boolean(thirdPlaceMatch || tournament.matches.some(match => match.round === totalRounds && match.position === 1))} /><section className="boardSection bracketSection" id="tabellone"><div className="sectionHeading"><div><p className="kicker">Tabellone</p><h2>Verso le finali</h2></div><span className="muted">Scegli un turno per seguire tutti gli abbinamenti</span></div><BracketGuide drawMode={tournament.drawMode} matches={tournament.matches} /><Bracket matches={tournament.matches} /></section><section className="boardSection" id="risultati"><div className="sectionHeading"><div><p className="kicker">Archivio</p><h2>Risultati</h2></div><span className="muted">{completed.length} incontri conclusi</span></div><ResultArchive matches={completed} totalRounds={totalRounds} /></section><footer className="siteFooter">Aggiornato alle {new Date(tournament.updatedAt).toLocaleTimeString("it-IT", { hour: "2-digit", minute: "2-digit" })}</footer></main>;
 }
 
 function Podium({ entries }: { entries: Array<{ place: number; label: string; name: string }> }) {
