@@ -65,6 +65,19 @@ export function repechagePlan(teamCount: number) {
   return { size, preliminaryMatches, byeSlots, selections: Math.min(preliminaryMatches, byeSlots) };
 }
 
+export function tournamentFormatAdvice(teamCount: number) {
+  const plan = repechagePlan(teamCount);
+  const eliminated = plan.preliminaryMatches - plan.selections;
+  const repechageAvailable = plan.selections > 0 && eliminated > 0;
+  const selectiveRepechage = repechageAvailable && plan.selections <= eliminated;
+  const recommendedMode = selectiveRepechage ? "REPECHAGE" as const : "PRELIMINARIES" as const;
+  const reason = !plan.selections ? "Il tabellone è già completo: non ci sono posti per i ripescaggi." :
+    !eliminated ? "Tutte le sconfitte rientrerebbero: i preliminari non eliminerebbero nessuno." :
+    !selectiveRepechage ? "Rientrerebbe più della metà delle sconfitte: i preliminari sono più lineari." :
+    "Rientra al massimo metà delle sconfitte: il ripescaggio resta selettivo.";
+  return { ...plan, eliminated, repechageAvailable, selectiveRepechage, recommendedMode, reason };
+}
+
 export function tournamentEstimate(teamCount: number) {
   const plan = repechagePlan(teamCount);
   const thirdPlaceMatches = teamCount >= 4 ? 1 : 0;

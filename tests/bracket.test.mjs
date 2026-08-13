@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { assertBocceScore, bracketSize, cascadeCoordinates, firstRoundSlots, MAX_CONCURRENT_MATCHES, MAX_SCORE, MAX_TEAMS, MIN_WINNING_SCORE, nextMatchCoordinate, lateEntryPlans, matchDependencyGraph, repechageCutoff, repechagePlan, repechagePlayoffWave, shuffleItems, tournamentEstimate } from "../lib/bracket.ts";
+import { assertBocceScore, bracketSize, cascadeCoordinates, firstRoundSlots, MAX_CONCURRENT_MATCHES, MAX_SCORE, MAX_TEAMS, MIN_WINNING_SCORE, nextMatchCoordinate, lateEntryPlans, matchDependencyGraph, repechageCutoff, repechagePlan, repechagePlayoffWave, shuffleItems, tournamentEstimate, tournamentFormatAdvice } from "../lib/bracket.ts";
 
 test("every supported team count creates a traversable first round", () => {
   for (let count = 2; count <= MAX_TEAMS; count++) {
@@ -37,6 +37,19 @@ test("repechage plans select exactly the pairs needed to complete each bracket",
   assert.deepEqual(repechagePlan(13), { size: 16, preliminaryMatches: 5, byeSlots: 3, selections: 3 });
   assert.deepEqual(repechagePlan(7), { size: 8, preliminaryMatches: 3, byeSlots: 1, selections: 1 });
   assert.deepEqual(repechagePlan(16), { size: 16, preliminaryMatches: 8, byeSlots: 0, selections: 0 });
+});
+
+test("format advice rejects pointless repechages and recommends only selective ones", () => {
+  assert.deepEqual(tournamentFormatAdvice(19), { size: 32, preliminaryMatches: 3, byeSlots: 13, selections: 3, eliminated: 0, repechageAvailable: false, selectiveRepechage: false, recommendedMode: "PRELIMINARIES", reason: "Tutte le sconfitte rientrerebbero: i preliminari non eliminerebbero nessuno." });
+  assert.equal(tournamentFormatAdvice(25).recommendedMode, "PRELIMINARIES");
+  assert.equal(tournamentFormatAdvice(25).repechageAvailable, true);
+  assert.equal(tournamentFormatAdvice(27).recommendedMode, "REPECHAGE");
+  assert.equal(tournamentFormatAdvice(32).repechageAvailable, false);
+  for (let count = 2; count <= MAX_TEAMS; count++) {
+    const advice = tournamentFormatAdvice(count);
+    if (advice.recommendedMode === "REPECHAGE") assert.ok(advice.selections <= advice.eliminated);
+    if (!advice.repechageAvailable) assert.ok(advice.selections === 0 || advice.eliminated === 0);
+  }
 });
 
 test("format estimates explain preliminary and repechage match counts", () => {

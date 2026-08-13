@@ -1,6 +1,6 @@
 import { Prisma } from "../app/generated/prisma/client";
 import { prisma } from "./db";
-import { assertBocceScore, bracketSize, firstRoundSlots, matchDependencyGraph, lateEntryPlans, MAX_CONCURRENT_MATCHES, MAX_TEAMS, MIN_WINNING_SCORE, repechageCutoff, repechagePlan, repechagePlayoffWave, shuffleItems } from "./bracket";
+import { assertBocceScore, bracketSize, firstRoundSlots, matchDependencyGraph, lateEntryPlans, MAX_CONCURRENT_MATCHES, MAX_TEAMS, MIN_WINNING_SCORE, repechageCutoff, repechagePlan, repechagePlayoffWave, shuffleItems, tournamentFormatAdvice } from "./bracket";
 
 export const PUBLIC_INCLUDE = {
   matches: { orderBy: [{ round: "asc" as const }, { position: "asc" as const }], include: { teamA: true, teamB: true, winner: true } },
@@ -203,6 +203,8 @@ export async function generateDraw(tournamentId: string, drawMode: "PRELIMINARIE
       const played = await tx.match.count({ where: { tournamentId, status: "FINISHED", teamAId: { not: null }, teamBId: { not: null } } });
       if (played) throw Error("Ci sono risultati registrati: puoi modificare i nomi, ma non aggiungere o rimuovere coppie");
     }
+    const formatAdvice = tournamentFormatAdvice(teams.length);
+    if (drawMode === "REPECHAGE" && !formatAdvice.repechageAvailable) throw Error(formatAdvice.reason + " Usa i preliminari.");
     const size = bracketSize(teams.length);
     const slots = firstRoundSlots(shuffleItems(teams));
     const keepLive = rebuild && tournament.status === "LIVE";

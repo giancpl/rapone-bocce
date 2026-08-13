@@ -12,7 +12,7 @@ export const metadata: Metadata = {
 const rules = [
   { number: "01", title: "Composizione delle coppie", text: "Ogni coppia è composta da due giocatori, indicati con nome e cognome al momento dell’iscrizione." },
   { number: "02", title: "Punteggio della partita", text: "La vittoria è valida quando una coppia conclude con almeno " + MIN_WINNING_SCORE + " punti e non più di " + MAX_SCORE + ". Il pareggio non è ammesso." },
-  { number: "03", title: "Formula del torneo", text: "Il torneo è a eliminazione diretta. Prima del sorteggio l’organizzazione sceglie tra preliminari a eliminazione diretta e formula con ripescaggi. Numero di incontri e passaggi automatici vengono mostrati prima della conferma." },
+  { number: "03", title: "Formula del torneo", text: "Il torneo è a eliminazione diretta. Prima del sorteggio il sistema consiglia la formula più coerente con il numero di coppie. I ripescaggi vengono esclusi quando farebbero rientrare tutte le sconfitte e consigliati solo quando restano selettivi." },
   { number: "04", title: "Ripescaggi e spareggi", text: "Il sistema propone le migliori sconfitte ordinandole per differenza punti e poi per punti segnati. L’admin controlla e conferma ogni passaggio; una parità decisiva produce uno spareggio." },
   { number: "05", title: "Svolgimento degli incontri", text: "Possono esserci al massimo " + MAX_CONCURRENT_MATCHES + " partite in corso nello stesso momento. Gli stati pubblicati sono: in attesa, in corso e finita." },
   { number: "06", title: "Finali e podio", text: "Le vincenti delle semifinali disputano la finale per il 1° e 2° posto; le sconfitte disputano la finale per il 3° e 4° posto. Al termine viene pubblicato il podio completo." }
