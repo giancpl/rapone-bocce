@@ -32,6 +32,19 @@ export function firstRoundSlots<T>(teams: T[]): Array<T | null> {
   return pairs.flat();
 }
 
+/** Pairs every team in the repechage qualifying phase; only an odd team receives a bye. */
+export function repechageRoundSlots<T>(teams: T[]): Array<T | null> {
+  const matchCount = bracketSize(teams.length) / 2;
+  const pairedMatches = Math.floor(teams.length / 2);
+  const occupiedMatches = pairedMatches + teams.length % 2;
+  const positions = spreadPositions(matchCount, occupiedMatches);
+  const pairs = Array.from({ length: matchCount }, () => [null, null] as [T | null, T | null]);
+  let teamIndex = 0;
+  for (let index = 0; index < pairedMatches; index++) pairs[positions[index]] = [teams[teamIndex++], teams[teamIndex++]];
+  if (teams.length % 2) pairs[positions[positions.length - 1]] = [teams[teamIndex], null];
+  return pairs.flat();
+}
+
 
 export const FIELD_COUNT = 2;
 
@@ -60,42 +73,42 @@ export function shuffleItems<T>(items: T[], random: () => number = Math.random) 
 
 export function repechagePlan(teamCount: number) {
   const size = bracketSize(teamCount);
-  const preliminaryMatches = teamCount - size / 2;
-  const byeSlots = size - teamCount;
-  return { size, preliminaryMatches, byeSlots, selections: Math.min(preliminaryMatches, byeSlots) };
+  const preliminaryMatches = Math.floor(teamCount / 2);
+  const byeSlots = teamCount % 2;
+  const selections = size / 2 - preliminaryMatches - byeSlots;
+  return { size, preliminaryMatches, byeSlots, selections };
 }
 
 export function tournamentFormatAdvice(teamCount: number) {
   const plan = repechagePlan(teamCount);
+  const directPreliminaryMatches = teamCount - plan.size / 2;
+  const directByeSlots = plan.size - teamCount;
   const eliminated = plan.preliminaryMatches - plan.selections;
-  const repechageAvailable = plan.selections > 0 && eliminated > 0;
-  const selectiveRepechage = repechageAvailable && plan.selections <= eliminated;
+  const selectiveRepechage = plan.selections > 0 && plan.selections <= eliminated;
   const recommendedMode = selectiveRepechage ? "REPECHAGE" as const : "PRELIMINARIES" as const;
-  const reason = !plan.selections ? "Il tabellone è già completo: non ci sono posti per i ripescaggi." :
-    !eliminated ? "Tutte le sconfitte rientrerebbero: i preliminari non eliminerebbero nessuno." :
-    !selectiveRepechage ? "Rientrerebbe più della metà delle sconfitte: i preliminari sono più lineari." :
-    "Rientra al massimo metà delle sconfitte: il ripescaggio resta selettivo.";
-  return { ...plan, eliminated, repechageAvailable, selectiveRepechage, recommendedMode, reason };
+  const reason = !plan.selections
+    ? "Il numero di coppie completa già il turno: il ripescaggio non aggiungerebbe posti."
+    : !selectiveRepechage
+      ? "Con i ripescaggi rientrerebbero " + plan.selections + " delle " + plan.preliminaryMatches + " sconfitte; i preliminari sono più lineari con " + directPreliminaryMatches + " incontri iniziali e " + directByeSlots + " passaggi diretti."
+      : "Il ripescaggio è selettivo: tutte le coppie " + (plan.byeSlots ? "tranne una " : "") + "giocano subito e rientrano solo " + plan.selections + " delle " + plan.preliminaryMatches + " sconfitte.";
+  return { ...plan, directPreliminaryMatches, directByeSlots, eliminated, repechageAvailable: true, selectiveRepechage, recommendedMode, reason };
 }
 
 export function tournamentEstimate(teamCount: number) {
   const plan = repechagePlan(teamCount);
   const thirdPlaceMatches = teamCount >= 4 ? 1 : 0;
+  const directPreliminaryMatches = teamCount - plan.size / 2;
+  const directByeSlots = plan.size - teamCount;
   const directMatches = teamCount - 1 + thirdPlaceMatches;
   const matchesAfterFirstRound = plan.size / 2 - 1;
-  const repechageMatches = plan.preliminaryMatches + plan.selections + matchesAfterFirstRound + thirdPlaceMatches;
-  const maxTieBreakMatches = Math.max(0, plan.preliminaryMatches - plan.selections);
+  const repechageMatches = plan.preliminaryMatches + matchesAfterFirstRound + thirdPlaceMatches;
+  const maxTieBreakMatches = plan.selections ? Math.max(0, plan.preliminaryMatches - plan.selections) : 0;
   return {
-    ...plan,
-    rounds: Math.log2(plan.size),
-    thirdPlaceMatches,
-    directMatches,
-    repechageMatches,
-    maxTieBreakMatches,
+    ...plan, directPreliminaryMatches, directByeSlots,
+    rounds: Math.log2(plan.size), thirdPlaceMatches, directMatches, repechageMatches, maxTieBreakMatches,
     repechageMaxMatches: repechageMatches + maxTieBreakMatches
   };
 }
-
 
 export type RepechageCandidate = { id: string; difference: number; scored: number };
 

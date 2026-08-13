@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { assertBocceScore, bracketSize, cascadeCoordinates, firstRoundSlots, MAX_CONCURRENT_MATCHES, MAX_SCORE, MAX_TEAMS, MIN_WINNING_SCORE, nextMatchCoordinate, lateEntryPlans, matchDependencyGraph, repechageCutoff, repechagePlan, repechagePlayoffWave, shuffleItems, tournamentEstimate, tournamentFormatAdvice } from "../lib/bracket.ts";
+import { assertBocceScore, bracketSize, cascadeCoordinates, firstRoundSlots, MAX_CONCURRENT_MATCHES, MAX_SCORE, MAX_TEAMS, MIN_WINNING_SCORE, nextMatchCoordinate, lateEntryPlans, matchDependencyGraph, repechageCutoff, repechagePlan, repechagePlayoffWave, repechageRoundSlots, shuffleItems, tournamentEstimate, tournamentFormatAdvice } from "../lib/bracket.ts";
 
 test("every supported team count creates a traversable first round", () => {
   for (let count = 2; count <= MAX_TEAMS; count++) {
@@ -32,31 +32,50 @@ test("next slots remain deterministic", () => {
 });
 
 
-test("repechage plans select exactly the pairs needed to complete each bracket", () => {
-  assert.deepEqual(repechagePlan(10), { size: 16, preliminaryMatches: 2, byeSlots: 6, selections: 2 });
-  assert.deepEqual(repechagePlan(13), { size: 16, preliminaryMatches: 5, byeSlots: 3, selections: 3 });
-  assert.deepEqual(repechagePlan(7), { size: 8, preliminaryMatches: 3, byeSlots: 1, selections: 1 });
-  assert.deepEqual(repechagePlan(16), { size: 16, preliminaryMatches: 8, byeSlots: 0, selections: 0 });
-});
-
-test("format advice rejects pointless repechages and recommends only selective ones", () => {
-  assert.deepEqual(tournamentFormatAdvice(19), { size: 32, preliminaryMatches: 3, byeSlots: 13, selections: 3, eliminated: 0, repechageAvailable: false, selectiveRepechage: false, recommendedMode: "PRELIMINARIES", reason: "Tutte le sconfitte rientrerebbero: i preliminari non eliminerebbero nessuno." });
-  assert.equal(tournamentFormatAdvice(25).recommendedMode, "PRELIMINARIES");
-  assert.equal(tournamentFormatAdvice(25).repechageAvailable, true);
-  assert.equal(tournamentFormatAdvice(27).recommendedMode, "REPECHAGE");
-  assert.equal(tournamentFormatAdvice(32).repechageAvailable, false);
+test("repechage rounds pair every possible team before selecting losers", () => {
   for (let count = 2; count <= MAX_TEAMS; count++) {
-    const advice = tournamentFormatAdvice(count);
-    if (advice.recommendedMode === "REPECHAGE") assert.ok(advice.selections <= advice.eliminated);
-    if (!advice.repechageAvailable) assert.ok(advice.selections === 0 || advice.eliminated === 0);
+    const teams = Array.from({ length: count }, (_, index) => index + 1);
+    const slots = repechageRoundSlots(teams);
+    const pairs = Array.from({ length: slots.length / 2 }, (_, index) => slots.slice(index * 2, index * 2 + 2));
+    assert.equal(slots.length, bracketSize(count));
+    assert.equal(new Set(slots.filter(Boolean)).size, count);
+    assert.equal(pairs.filter(pair => pair[0] && pair[1]).length, Math.floor(count / 2));
+    assert.equal(pairs.filter(pair => Boolean(pair[0]) !== Boolean(pair[1])).length, count % 2);
+    assert.equal(pairs.filter(pair => !pair[0] && !pair[1]).length, repechagePlan(count).selections);
   }
 });
 
-test("format estimates explain preliminary and repechage match counts", () => {
-  assert.deepEqual(tournamentEstimate(10), { size: 16, preliminaryMatches: 2, byeSlots: 6, selections: 2, rounds: 4, thirdPlaceMatches: 1, directMatches: 10, repechageMatches: 12, maxTieBreakMatches: 0, repechageMaxMatches: 12 });
-  assert.deepEqual(tournamentEstimate(13), { size: 16, preliminaryMatches: 5, byeSlots: 3, selections: 3, rounds: 4, thirdPlaceMatches: 1, directMatches: 13, repechageMatches: 16, maxTieBreakMatches: 2, repechageMaxMatches: 18 });
+test("repechage plans pair all teams and fill only the missing qualifiers", () => {
+  assert.deepEqual(repechagePlan(10), { size: 16, preliminaryMatches: 5, byeSlots: 0, selections: 3 });
+  assert.deepEqual(repechagePlan(13), { size: 16, preliminaryMatches: 6, byeSlots: 1, selections: 1 });
+  assert.deepEqual(repechagePlan(7), { size: 8, preliminaryMatches: 3, byeSlots: 1, selections: 0 });
+  assert.deepEqual(repechagePlan(16), { size: 16, preliminaryMatches: 8, byeSlots: 0, selections: 0 });
+  assert.deepEqual(repechagePlan(30), { size: 32, preliminaryMatches: 15, byeSlots: 0, selections: 1 });
+});
+
+test("format advice recommends a mode but keeps both formulas available", () => {
+  const nineteen = tournamentFormatAdvice(19);
+  assert.deepEqual(nineteen, { size: 32, preliminaryMatches: 9, byeSlots: 1, selections: 6, directPreliminaryMatches: 3, directByeSlots: 13, eliminated: 3, repechageAvailable: true, selectiveRepechage: false, recommendedMode: "PRELIMINARIES", reason: "Con i ripescaggi rientrerebbero 6 delle 9 sconfitte; i preliminari sono più lineari con 3 incontri iniziali e 13 passaggi diretti." });
+  assert.equal(tournamentFormatAdvice(25).recommendedMode, "REPECHAGE");
+  assert.equal(tournamentFormatAdvice(27).recommendedMode, "REPECHAGE");
+  assert.equal(tournamentFormatAdvice(30).recommendedMode, "REPECHAGE");
+  assert.equal(tournamentFormatAdvice(32).recommendedMode, "PRELIMINARIES");
+  for (let count = 2; count <= MAX_TEAMS; count++) {
+    const advice = tournamentFormatAdvice(count);
+    assert.equal(advice.repechageAvailable, true);
+    if (advice.recommendedMode === "REPECHAGE") assert.ok(advice.selections > 0 && advice.selections <= advice.eliminated);
+  }
+});
+
+test("format estimates distinguish direct preliminaries from repechage qualifiers", () => {
+  assert.deepEqual(tournamentEstimate(10), { size: 16, preliminaryMatches: 5, byeSlots: 0, selections: 3, directPreliminaryMatches: 2, directByeSlots: 6, rounds: 4, thirdPlaceMatches: 1, directMatches: 10, repechageMatches: 13, maxTieBreakMatches: 2, repechageMaxMatches: 15 });
+  assert.deepEqual(tournamentEstimate(13), { size: 16, preliminaryMatches: 6, byeSlots: 1, selections: 1, directPreliminaryMatches: 5, directByeSlots: 3, rounds: 4, thirdPlaceMatches: 1, directMatches: 13, repechageMatches: 14, maxTieBreakMatches: 5, repechageMaxMatches: 19 });
   assert.equal(tournamentEstimate(3).directMatches, 2);
-  assert.equal(tournamentEstimate(3).repechageMatches, 3);
+  assert.equal(tournamentEstimate(3).repechageMatches, 2);
+  assert.equal(tournamentEstimate(30).preliminaryMatches, 15);
+  assert.equal(tournamentEstimate(30).selections, 1);
+  assert.equal(tournamentEstimate(30).directPreliminaryMatches, 14);
+  assert.equal(tournamentEstimate(30).directByeSlots, 2);
   for (let count = 2; count <= MAX_TEAMS; count++) {
     const estimate = tournamentEstimate(count);
     assert.ok(estimate.repechageMatches >= estimate.directMatches);
