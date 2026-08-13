@@ -15,11 +15,11 @@ test("every supported team count creates a traversable first round", () => {
 
 test("invalid team counts and bocce scores are rejected", () => {
   for (const count of [0, 1, MAX_TEAMS + 1, 3.5]) assert.throws(() => bracketSize(count));
-  for (const score of [[11, 0], [12, 12], [15, 2], [-1, 12], [12.5, 2]]) assert.throws(() => assertBocceScore(score[0], score[1]));
+  for (const score of [[11, 0], [12, 12], [16, 2], [-1, 12], [12.5, 2]]) assert.throws(() => assertBocceScore(score[0], score[1]));
   assert.doesNotThrow(() => assertBocceScore(12, 0));
-  assert.doesNotThrow(() => assertBocceScore(14, 13));
+  assert.doesNotThrow(() => assertBocceScore(15, 14));
   assert.equal(MIN_WINNING_SCORE, 12);
-  assert.equal(MAX_SCORE, 14);
+  assert.equal(MAX_SCORE, 15);
 });
 
 test("at most two matches can run concurrently", () => {

@@ -100,7 +100,7 @@ function Brand() {
 }
 
 function LandingTop() {
-  return <div className="landingTop"><Brand /><Countdown compact /></div>;
+  return <div className="landingTop"><Brand /><Countdown compact landing /></div>;
 }
 
 function PublicHero({ tournament, live, next, completed, totalRounds }: { tournament: Tournament; live: number; next: number; completed: number; totalRounds: number }) {
@@ -121,12 +121,12 @@ function RegistrationForm({ playerOne, playerTwo, setPlayerOne, setPlayerTwo, su
   return <form className="registrationForm" onSubmit={submit}><label>Primo giocatore<input required placeholder="Nome e cognome" value={playerOne} onChange={event => setPlayerOne(event.target.value)} /></label><label>Secondo giocatore<input required placeholder="Nome e cognome" value={playerTwo} onChange={event => setPlayerTwo(event.target.value)} /></label><button className="primaryButton" disabled={sending}>{sending ? "Invio…" : "Richiedi iscrizione"}</button>{message && <p className={message.startsWith("Richiesta") ? "formSuccess" : "softError"}>{message}</p>}</form>;
 }
 
-function Countdown({ compact = false }: { compact?: boolean }) {
+function Countdown({ compact = false, landing = false }: { compact?: boolean; landing?: boolean }) {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => { const timer = window.setInterval(() => setNow(Date.now()), 1000); return () => window.clearInterval(timer); }, []);
   const remaining = Math.max(0, OFFICIAL_START.getTime() - now);
   const parts = [{ label: "giorni", value: Math.floor(remaining / 86400000) }, { label: "ore", value: Math.floor(remaining / 3600000) % 24 }, { label: "min", value: Math.floor(remaining / 60000) % 60 }, { label: "sec", value: Math.floor(remaining / 1000) % 60 }];
-  return <section className={["countdown", compact ? "compact" : ""].join(" ")}><div><p className="kicker">Inizio ufficiale</p><strong>{remaining ? "13 agosto · ore 16:00" : "Il torneo è iniziato"}</strong></div>{remaining > 0 && <div className="countdownUnits">{parts.map(part => <span key={part.label}><b>{String(part.value).padStart(2, "0")}</b><small>{part.label}</small></span>)}</div>}</section>;
+  return <section className={["countdown", compact ? "compact" : "", landing ? "landingCountdown" : ""].join(" ")}><div className="countdownIntro"><p className="kicker">Inizio ufficiale</p><strong>{remaining ? "13 AGO · 16:00" : "Torneo iniziato"}</strong></div>{remaining > 0 && <div className="countdownUnits">{parts.map(part => <span key={part.label}><b>{String(part.value).padStart(2, "0")}</b><small>{part.label}</small></span>)}</div>}</section>;
 }
 
 function roundName(round: number, total: number) {

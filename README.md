@@ -36,7 +36,7 @@ Per produzione la migrazione si applica con:
 - tutte le mutazioni richiedono sessione admin
 - sorteggio bloccato dopo READY
 - risultati accettati solo per partite LIVE
-- risultato valido con vincitore da 12 a 14 punti; pareggi non ammessi
+- risultato valido con vincitore da 12 a 15 punti; pareggi non ammessi
 - transazione serializable + retry per evitare aggiornamenti concorrenti
 
 ## Nota

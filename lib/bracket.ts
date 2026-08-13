@@ -1,7 +1,7 @@
 export const MAX_TEAMS = 64;
 export const MAX_CONCURRENT_MATCHES = 2;
 export const MIN_WINNING_SCORE = 12;
-export const MAX_SCORE = 14;
+export const MAX_SCORE = 15;
 
 export function bracketSize(teamCount: number) {
   if (!Number.isInteger(teamCount) || teamCount < 2 || teamCount > MAX_TEAMS) {
