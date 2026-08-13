@@ -15,21 +15,14 @@ export async function getTournamentSummary() {
 
 export async function getTournament() {
   const tournament = await prisma.tournament.findFirst({ orderBy: { createdAt: "desc" }, include: PUBLIC_INCLUDE });
-  if (tournament?.status === "LIVE" && tournament.drawMode === "REPECHAGE" && !tournament.repechageFinalizedAt) {
-    const panel = repechage(tournament);
-    if (panel?.ready && !panel.playoffs.some((match: any) => match.status !== "FINISHED")) {
-      try { await ensureAutomaticRepechage(tournament.id); } catch (error: any) { if (!["P2002", "P2034"].includes(error?.code)) throw error; }
-      return prisma.tournament.findUnique({ where: { id: tournament.id }, include: PUBLIC_INCLUDE });
-    }
-  }
   if (tournament?.status === "LIVE" && tournament.teams.length >= 2 && tournament.matches.length > 0 && tournament.matches.every(match => match.status === "FINISHED")) {
     return prisma.tournament.update({ where: { id: tournament.id }, data: { status: "FINISHED", finishedAt: tournament.finishedAt ?? new Date() }, include: PUBLIC_INCLUDE });
   }
   return tournament;
 }
 
-function defeatedCandidates(tournament: any) {
-  return tournament.matches.filter((match: any) => match.round === 1 && match.status === "FINISHED" && Math.max(match.scoreA, match.scoreB) >= MIN_WINNING_SCORE && match.teamA && match.teamB && match.winnerId).map((match: any) => {
+function defeatedCandidatesFrom(matches: any[]) {
+  return matches.filter((match: any) => match.status === "FINISHED" && Math.max(match.scoreA, match.scoreB) >= MIN_WINNING_SCORE && match.teamA && match.teamB && match.winnerId).map((match: any) => {
     const loser = match.winnerId === match.teamAId ? match.teamB : match.teamA;
     const scored = match.winnerId === match.teamAId ? match.scoreB : match.scoreA;
     const conceded = match.winnerId === match.teamAId ? match.scoreA : match.scoreB;
@@ -38,22 +31,43 @@ function defeatedCandidates(tournament: any) {
 }
 
 function repechage(tournament: any) {
-  if (tournament.drawMode !== "REPECHAGE" || tournament.repechageFinalizedAt || tournament.teams.length < 2) return null;
+  if (tournament.drawMode !== "REPECHAGE" || tournament.teams.length < 2) return null;
   const plan = repechagePlan(tournament.teams.length);
   if (!plan.selections) return null;
   const firstRound = tournament.matches.filter((match: any) => match.round === 1);
-  const qualifying = firstRound.filter((match: any) => match.status === "FINISHED" && Math.max(match.scoreA, match.scoreB) >= MIN_WINNING_SCORE && match.teamA && match.teamB && match.winnerId);
-  const candidates = defeatedCandidates(tournament);
-  const allQualifiersFinished = qualifying.length === plan.preliminaryMatches;
-  const used = new Set(firstRound.filter((match: any) => match.status === "SCHEDULED" && match.teamA && match.teamB).flatMap((match: any) => [match.teamAId, match.teamBId]));
-  const assignments = firstRound.filter((match: any) => match.status === "SCHEDULED" && match.teamA && match.teamB).map((match: any) => {
+  const originals = originalPreliminaries(tournament);
+  const originalIds = new Set(originals.map((match: any) => match.id));
+  const candidates = defeatedCandidatesFrom(originals);
+  const ready = originals.length === plan.preliminaryMatches;
+  const cutoff = ready ? repechageCutoff(candidates, plan.selections) : null;
+  const playoffMatches = tournament.matches.filter((match: any) => match.round === 0);
+  const eliminated = new Set(playoffMatches.filter((match: any) => match.status === "FINISHED" && match.winnerId).map((match: any) => match.winnerId === match.teamAId ? match.teamBId : match.teamAId));
+  const survivors = cutoff?.tied.filter((candidate: any) => !eliminated.has(candidate.id)) ?? [];
+  const unfinishedPlayoffs = playoffMatches.filter((match: any) => match.status !== "FINISHED").length;
+  let action: "GENERATE_PLAYOFFS" | "CONTINUE_PLAYOFFS" | "CONFIRM_SELECTIONS" | null = null;
+  if (ready && !tournament.repechageFinalizedAt) {
+    if (!cutoff?.needsPlayoff) action = "CONFIRM_SELECTIONS";
+    else if (!playoffMatches.length) action = "GENERATE_PLAYOFFS";
+    else if (!unfinishedPlayoffs) action = survivors.length > cutoff.remaining ? "CONTINUE_PLAYOFFS" : "CONFIRM_SELECTIONS";
+  }
+  const assignments = firstRound.filter((match: any) => !originalIds.has(match.id) && match.teamA && match.teamB).map((match: any) => {
     const selected = candidates.find((candidate: any) => candidate.id === match.teamAId || candidate.id === match.teamBId);
     return selected ? { matchId: match.id, teamId: selected.id, team: selected.name, opponent: displayName(match.teamAId === selected.id ? match.teamB : match.teamA) } : null;
   }).filter(Boolean);
-  const slots = firstRound.filter((match: any) => match.status === "SCHEDULED" && Boolean(match.teamAId) !== Boolean(match.teamBId)).map((match: any) => ({ id: match.id, opponent: displayName(match.teamA ?? match.teamB) }));
-  const playoffs = tournament.matches.filter((match: any) => match.round === 0).map((match: any) => ({ id: match.id, a: match.teamA ? displayName(match.teamA) : null, b: match.teamB ? displayName(match.teamB) : null, status: match.status, winner: match.winner ? displayName(match.winner) : null }));
-  const cutoff = allQualifiersFinished ? repechageCutoff(candidates, plan.selections) : null;
-  return { automatic: true, qualifying: { completed: qualifying.length, total: plan.preliminaryMatches }, selections: plan.selections, assigned: assignments.length, ready: allQualifiersFinished, needsPlayoff: Boolean(cutoff?.needsPlayoff), guaranteed: cutoff?.guaranteed.map((team: any) => team.name) ?? [], candidates: candidates.filter((candidate: any) => !used.has(candidate.id)), slots, assignments, playoffs };
+  const selectedIds = new Set(assignments.map((item: any) => item.teamId));
+  if (!tournament.repechageFinalizedAt && cutoff && !cutoff.needsPlayoff) cutoff.ranked.slice(0, plan.selections).forEach((candidate: any) => selectedIds.add(candidate.id));
+  if (!tournament.repechageFinalizedAt && cutoff?.needsPlayoff) {
+    cutoff.guaranteed.forEach((candidate: any) => selectedIds.add(candidate.id));
+    if (playoffMatches.length && !unfinishedPlayoffs && survivors.length <= cutoff.remaining) survivors.forEach((candidate: any) => selectedIds.add(candidate.id));
+  }
+  const tiedIds = new Set(cutoff?.tied.map((candidate: any) => candidate.id) ?? []);
+  const ranking = candidates.map((candidate: any, index: number) => ({
+    ...candidate, rank: index + 1,
+    outcome: selectedIds.has(candidate.id) ? (tournament.repechageFinalizedAt ? "SELECTED" : "PROPOSED") : eliminated.has(candidate.id) ? "ELIMINATED" : tiedIds.has(candidate.id) && cutoff?.needsPlayoff ? "PLAYOFF" : "OUT"
+  }));
+  const slots = firstRound.filter((match: any) => !originalIds.has(match.id) && Boolean(match.teamAId) !== Boolean(match.teamBId)).map((match: any) => ({ id: match.id, opponent: displayName(match.teamA ?? match.teamB) }));
+  const playoffs = playoffMatches.map((match: any) => ({ id: match.id, a: match.teamA ? displayName(match.teamA) : null, b: match.teamB ? displayName(match.teamB) : null, status: match.status, winner: match.winner ? displayName(match.winner) : null }));
+  return { automatic: true, requiresAdmin: true, finalized: Boolean(tournament.repechageFinalizedAt), action, qualifying: { completed: originals.length, total: plan.preliminaryMatches }, selections: plan.selections, assigned: assignments.length, ready, needsPlayoff: Boolean(cutoff?.needsPlayoff), guaranteed: cutoff?.guaranteed.map((team: any) => team.name) ?? [], candidates, ranking, slots, assignments, playoffs };
 }
 
 function teamManagement(tournament: any) {
@@ -132,11 +146,13 @@ async function schedule(tx: any, tournamentId: string) {
 
 async function progressAutomaticRepechage(tx: any, tournamentId: string) {
   const tournament = await tx.tournament.findUnique({ where: { id: tournamentId }, include: PUBLIC_INCLUDE });
-  if (!tournament || tournament.drawMode !== "REPECHAGE" || tournament.repechageFinalizedAt || tournament.teams.length < 2) return;
+  if (!tournament) throw Error("Torneo non trovato");
+  if (tournament.drawMode !== "REPECHAGE" || tournament.teams.length < 2) throw Error("Ripescaggi non disponibili per questo torneo");
+  if (tournament.repechageFinalizedAt) throw Error("I ripescaggi sono già stati confermati");
   const plan = repechagePlan(tournament.teams.length);
-  if (!plan.selections) { await advanceByes(tx, tournamentId); await tx.tournament.update({ where: { id: tournamentId }, data: { repechageFinalizedAt: new Date() } }); return; }
-  const candidates = defeatedCandidates(tournament);
-  if (candidates.length !== plan.preliminaryMatches) return;
+  if (!plan.selections) throw Error("Non sono necessari ripescaggi con questo numero di coppie");
+  const candidates = defeatedCandidatesFrom(originalPreliminaries(tournament));
+  if (candidates.length !== plan.preliminaryMatches) throw Error("Completa tutti i preliminari prima di confermare la classifica");
   const cutoff = repechageCutoff(candidates, plan.selections);
   let qualifiers: any[];
   if (cutoff.needsPlayoff) {
@@ -144,7 +160,7 @@ async function progressAutomaticRepechage(tx: any, tournamentId: string) {
     const unfinished = playoffs.filter((match: any) => match.status !== "FINISHED");
     const eliminated = new Set(playoffs.filter((match: any) => match.status === "FINISHED" && match.winnerId).map((match: any) => match.winnerId === match.teamAId ? match.teamBId : match.teamAId));
     const survivors = cutoff.tied.filter((candidate: any) => !eliminated.has(candidate.id));
-    if (unfinished.length) return;
+    if (unfinished.length) throw Error("Completa tutti gli spareggi prima di continuare");
     if (survivors.length > cutoff.remaining) {
       const pairs = repechagePlayoffWave(survivors, cutoff.remaining);
       const nextPosition = playoffs.reduce((max: number, match: any) => Math.max(max, match.position + 1), 0);
@@ -173,7 +189,7 @@ async function progressAutomaticRepechage(tx: any, tournamentId: string) {
 }
 
 
-export async function ensureAutomaticRepechage(tournamentId: string) {
+export async function confirmAutomaticRepechage(tournamentId: string) {
   return prisma.$transaction(async tx => progressAutomaticRepechage(tx, tournamentId), { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
 }
 
@@ -199,6 +215,31 @@ export async function generateDraw(tournamentId: string, drawMode: "PRELIMINARIE
   }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
 }
 
+
+const TEST_FIRST_NAMES = ["Andrea", "Luca", "Marco", "Paolo", "Matteo", "Davide", "Simone", "Antonio", "Giuseppe", "Francesco", "Michele", "Stefano", "Alessandro", "Roberto", "Fabio", "Nicola"];
+const TEST_LAST_NAMES = ["Rossi", "Bianchi", "Romano", "Esposito", "Ferrari", "Gallo", "Bruno", "Ricci", "Marino", "Greco", "Conti", "De Luca", "Costa", "Mancini", "Lombardi", "Moretti"];
+
+export async function generateTestTeams(tournamentId: string, count: number) {
+  if (!Number.isInteger(count) || count < 1 || count > MAX_TEAMS) throw Error("Numero di coppie test non valido");
+  return prisma.$transaction(async tx => {
+    const tournament = await tx.tournament.findUnique({ where: { id: tournamentId }, include: { teams: true } });
+    if (!tournament) throw Error("Torneo non trovato");
+    if (tournament.status !== "SETUP") throw Error("Le coppie di prova si possono generare solo prima del sorteggio");
+    if (tournament.teams.length + count > MAX_TEAMS) throw Error("Puoi aggiungere al massimo " + (MAX_TEAMS - tournament.teams.length) + " coppie");
+    const token = Date.now().toString(36).slice(-4).toUpperCase();
+    const people = shuffleItems(Array.from({ length: count * 2 }, (_, index) => {
+      const first = TEST_FIRST_NAMES[(index * 7 + tournament.teams.length) % TEST_FIRST_NAMES.length];
+      const last = TEST_LAST_NAMES[(index * 11 + Math.floor(index / TEST_FIRST_NAMES.length)) % TEST_LAST_NAMES.length];
+      return first + " " + last + " · Test " + token + String(index + 1).padStart(2, "0");
+    }));
+    const teams = [];
+    for (let index = 0; index < count; index++) {
+      const playerOne = people[index * 2], playerTwo = people[index * 2 + 1];
+      teams.push(await tx.team.create({ data: { tournamentId, playerOne, playerTwo, name: playerOne + " / " + playerTwo }, select: { id: true, name: true, playerOne: true, playerTwo: true } }));
+    }
+    return teams;
+  }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+}
 
 export async function addTournamentTeam(tournamentId: string, values: { name: string; playerOne: string; playerTwo: string }) {
   return prisma.$transaction(async tx => {
@@ -337,7 +378,6 @@ export async function submitResult(tournamentId: string, matchId: string, scoreA
     const result = await tx.match.update({ where: { id: match.id }, data: { scoreA, scoreB, winnerId, status: "FINISHED", field: null, finishedAt: new Date() } });
     if (match.round > 0) await advanceResult(tx, tournamentId, match, winnerId);
     if (tournament.drawMode === "PRELIMINARIES") await advanceByes(tx, tournamentId);
-    if (tournament.drawMode === "REPECHAGE") await progressAutomaticRepechage(tx, tournamentId);
     await schedule(tx, tournamentId);
     const unfinished = await tx.match.count({ where: { tournamentId, status: { not: "FINISHED" } } });
     await tx.tournament.update({ where: { id: tournamentId }, data: unfinished ? {} : { status: "FINISHED", finishedAt: new Date() } });
@@ -410,7 +450,6 @@ async function restartRepechageAfterCorrection(tx: any, tournament: any, source:
     const originalWinner = match.id === source.id ? winnerId : match.winnerId;
     if (originalWinner) await advanceResult(tx, tournament.id, match, originalWinner);
   }
-  await progressAutomaticRepechage(tx, tournament.id);
   await schedule(tx, tournament.id);
 }
 

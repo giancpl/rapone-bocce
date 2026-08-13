@@ -65,6 +65,24 @@ export function repechagePlan(teamCount: number) {
   return { size, preliminaryMatches, byeSlots, selections: Math.min(preliminaryMatches, byeSlots) };
 }
 
+export function tournamentEstimate(teamCount: number) {
+  const plan = repechagePlan(teamCount);
+  const thirdPlaceMatches = teamCount >= 4 ? 1 : 0;
+  const directMatches = teamCount - 1 + thirdPlaceMatches;
+  const matchesAfterFirstRound = plan.size / 2 - 1;
+  const repechageMatches = plan.preliminaryMatches + plan.selections + matchesAfterFirstRound + thirdPlaceMatches;
+  const maxTieBreakMatches = Math.max(0, plan.preliminaryMatches - plan.selections);
+  return {
+    ...plan,
+    rounds: Math.log2(plan.size),
+    thirdPlaceMatches,
+    directMatches,
+    repechageMatches,
+    maxTieBreakMatches,
+    repechageMaxMatches: repechageMatches + maxTieBreakMatches
+  };
+}
+
 
 export type RepechageCandidate = { id: string; difference: number; scored: number };
 

@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { addTournamentTeam, getTournamentSummary, regenerateDraw } from "../../../lib/tournament-v2";
+import { addTournamentTeam, generateTestTeams, getTournamentSummary, regenerateDraw } from "../../../lib/tournament-v2";
 import { prisma } from "../../../lib/db";
 import { requireAdmin } from "../../../lib/auth";
 import { MAX_NAME_LENGTH } from "../../../lib/security";
@@ -35,7 +35,13 @@ export async function POST(request: Request) {
     const tournament = await getTournamentSummary();
     if (!tournament) throw Error("Torneo non trovato");
     await requireAdmin(tournament.id);
-    const result = await addTournamentTeam(tournament.id, pair(await request.json().catch(() => ({}))));
+    const body = await request.json().catch(() => ({}));
+    if (body.action === "generate-test") {
+      const count = Number(body.count);
+      const teams = await generateTestTeams(tournament.id, count);
+      return NextResponse.json({ ok: true, count: teams.length, teams });
+    }
+    const result = await addTournamentTeam(tournament.id, pair(body));
     return NextResponse.json({ ok: true, placed: Boolean(result.placement), ...result });
   } catch (error: any) { return response(error); }
 }

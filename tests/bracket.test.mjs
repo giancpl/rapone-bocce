@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { assertBocceScore, bracketSize, cascadeCoordinates, firstRoundSlots, MAX_CONCURRENT_MATCHES, MAX_SCORE, MAX_TEAMS, MIN_WINNING_SCORE, nextMatchCoordinate, lateEntryPlans, matchDependencyGraph, repechageCutoff, repechagePlan, repechagePlayoffWave, shuffleItems } from "../lib/bracket.ts";
+import { assertBocceScore, bracketSize, cascadeCoordinates, firstRoundSlots, MAX_CONCURRENT_MATCHES, MAX_SCORE, MAX_TEAMS, MIN_WINNING_SCORE, nextMatchCoordinate, lateEntryPlans, matchDependencyGraph, repechageCutoff, repechagePlan, repechagePlayoffWave, shuffleItems, tournamentEstimate } from "../lib/bracket.ts";
 
 test("every supported team count creates a traversable first round", () => {
   for (let count = 2; count <= MAX_TEAMS; count++) {
@@ -37,6 +37,18 @@ test("repechage plans select exactly the pairs needed to complete each bracket",
   assert.deepEqual(repechagePlan(13), { size: 16, preliminaryMatches: 5, byeSlots: 3, selections: 3 });
   assert.deepEqual(repechagePlan(7), { size: 8, preliminaryMatches: 3, byeSlots: 1, selections: 1 });
   assert.deepEqual(repechagePlan(16), { size: 16, preliminaryMatches: 8, byeSlots: 0, selections: 0 });
+});
+
+test("format estimates explain preliminary and repechage match counts", () => {
+  assert.deepEqual(tournamentEstimate(10), { size: 16, preliminaryMatches: 2, byeSlots: 6, selections: 2, rounds: 4, thirdPlaceMatches: 1, directMatches: 10, repechageMatches: 12, maxTieBreakMatches: 0, repechageMaxMatches: 12 });
+  assert.deepEqual(tournamentEstimate(13), { size: 16, preliminaryMatches: 5, byeSlots: 3, selections: 3, rounds: 4, thirdPlaceMatches: 1, directMatches: 13, repechageMatches: 16, maxTieBreakMatches: 2, repechageMaxMatches: 18 });
+  assert.equal(tournamentEstimate(3).directMatches, 2);
+  assert.equal(tournamentEstimate(3).repechageMatches, 3);
+  for (let count = 2; count <= MAX_TEAMS; count++) {
+    const estimate = tournamentEstimate(count);
+    assert.ok(estimate.repechageMatches >= estimate.directMatches);
+    assert.ok(estimate.repechageMaxMatches >= estimate.repechageMatches);
+  }
 });
 
 test("draw shuffle keeps every pair and changes their order with a supplied random source", () => {
