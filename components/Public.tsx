@@ -74,9 +74,10 @@ export default function Public({ initial, preview = false }: { initial: Tourname
     return <main className="landing"><div className="landingCard registrationLanding"><LandingTop /><p className="kicker">51° edizione</p><h1>Torneo di Bocce</h1><p>Iscrivi la tua coppia: la richiesta sarà verificata dall'organizzazione prima del sorteggio.</p><RegistrationForm playerOne={playerOne} playerTwo={playerTwo} setPlayerOne={setPlayerOne} setPlayerTwo={setPlayerTwo} submit={requestRegistration} sending={sending} message={registrationMessage} />{error && <p className="softError">{error}</p>}<Link className="landingRulesLink" href="/regolamento">Consulta il regolamento →</Link></div></main>;
   }
 
-  const live = tournament.matches.filter(match => match.status === "LIVE");
-  const active = tournament.matches.filter(match => match.status === "LIVE" && match.a && match.b);
-  const next = tournament.matches.filter(match => ["READY", "WAITING", "SCHEDULED"].includes(match.status) && match.a && match.b);
+  const byPriority = (a: Match, b: Match) => a.round - b.round || a.position - b.position;
+  const live = tournament.matches.filter(match => match.status === "LIVE").sort(byPriority);
+  const active = tournament.matches.filter(match => match.status === "LIVE" && match.a && match.b).sort(byPriority);
+  const next = tournament.matches.filter(match => ["READY", "WAITING", "SCHEDULED"].includes(match.status) && match.a && match.b).sort(byPriority);
   const completed = tournament.matches.filter(match => match.status === "FINISHED" && match.a && match.b);
   const totalRounds = Math.max(0, ...tournament.matches.map(match => match.round));
   const finalMatch = completed.find(match => match.round === totalRounds && match.position === 0);
@@ -178,9 +179,10 @@ function MatchCard({ match, prominent = false, compact = false, bracket = false,
   const label = isBye ? "Passaggio automatico" : match.status === "LIVE" ? "In corso" : ["WAITING", "READY", "SCHEDULED"].includes(match.status) ? "In attesa" : "Finita";
   const scoreA = match.status === "FINISHED" && !isBye ? match.scoreA : "-";
   const scoreB = match.status === "FINISHED" && !isBye ? match.scoreB : "-";
+  const statusLabel = !bracket && totalRounds ? label + " · " + roundName(match.round, totalRounds) : label;
   const finalLabel = totalRounds > 0 && match.round === totalRounds ? (match.position === 0 ? "Finale 1°/2°" : "Finale 3°/4°") : null;
   const destination = bracket && totalRounds ? match.round === 0 ? <>Vincente → <b>graduatoria ripescaggi</b></> : match.round === totalRounds ? (match.position === 0 ? "La coppia vincente diventa campione" : "La coppia vincente conquista il 3° posto") : hasThirdPlace && match.round === totalRounds - 1 ? <span className="bracketDualPath"><span>Vincente → <b>Finale 1°/2°</b></span><span>Sconfitta → <b>Finale 3°/4°</b></span></span> : <>Vincente → <b>{roundName(match.round + 1, totalRounds)} · incontro {Math.floor(match.position / 2) + 1}</b><em>{match.position % 2 === 0 ? "posto superiore" : "posto inferiore"}</em></> : null;
-  return <article className={["matchCard", prominent ? "prominent" : "", compact ? "compact" : "", bracket ? "bracketCard" : "", isBye ? "bye" : "", match.status.toLowerCase()].join(" ")}><header><span>{label}</span><span className="matchRound">{finalLabel ?? <>{match.round === 0 ? "Sp. " : "#"}{match.position + 1}</>}</span>{match.status === "LIVE" && <span className="liveDot">Live</span>}</header><div className={"teamLine " + (match.winner === match.a ? "winner" : "")}><b>{match.a || "Da definire"}</b><strong>{scoreA}</strong></div><div className={"teamLine " + (match.winner === match.b ? "winner" : "")}><b>{match.b || "Da definire"}</b><strong>{scoreB}</strong></div>{destination && <footer className="bracketPath">{destination}</footer>}</article>;
+  return <article className={["matchCard", prominent ? "prominent" : "", compact ? "compact" : "", bracket ? "bracketCard" : "", isBye ? "bye" : "", match.status.toLowerCase()].join(" ")}><header><span>{statusLabel}</span><span className="matchRound">{finalLabel ?? <>{match.round === 0 ? "Sp. " : "#"}{match.position + 1}</>}</span>{match.status === "LIVE" && <span className="liveDot">Live</span>}</header><div className={"teamLine " + (match.winner === match.a ? "winner" : "")}><b>{match.a || "Da definire"}</b><strong>{scoreA}</strong></div><div className={"teamLine " + (match.winner === match.b ? "winner" : "")}><b>{match.b || "Da definire"}</b><strong>{scoreB}</strong></div>{destination && <footer className="bracketPath">{destination}</footer>}</article>;
 }
 
 function Empty({ text }: { text: string }) {
