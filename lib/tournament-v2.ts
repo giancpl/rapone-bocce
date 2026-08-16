@@ -33,11 +33,11 @@ function bracketMatchRows(tournamentId: string, size: number, slots: Array<{ id:
 }
 
 export async function getTournamentSummary() {
-  return prisma.tournament.findFirst({ orderBy: { createdAt: "desc" }, select: { id: true, status: true, drawMode: true, startedAt: true, finishedAt: true } });
+  return prisma.tournament.findFirst({ where: { isCurrent: true }, select: { id: true, editionNumber: true, scheduledAt: true, status: true, drawMode: true, startedAt: true, finishedAt: true } });
 }
 
 export async function getTournament() {
-  const tournament = await prisma.tournament.findFirst({ orderBy: { createdAt: "desc" }, include: PUBLIC_INCLUDE });
+  const tournament = await prisma.tournament.findFirst({ where: { isCurrent: true }, include: PUBLIC_INCLUDE });
   if (tournament?.status === "LIVE" && tournament.teams.length >= 2 && tournament.matches.length > 0 && tournament.matches.every(match => match.status === "FINISHED")) {
     return prisma.tournament.update({ where: { id: tournament.id }, data: { status: "FINISHED", finishedAt: tournament.finishedAt ?? new Date() }, include: PUBLIC_INCLUDE });
   }
@@ -115,7 +115,7 @@ export function publicTournament(tournament: any) {
   if (!tournament) return null;
   const management = teamManagement(tournament);
   return {
-    id: tournament.id, name: tournament.name, edition: tournament.edition, status: tournament.status, drawMode: tournament.drawMode,
+    id: tournament.id, name: tournament.name, edition: tournament.edition, editionNumber: tournament.editionNumber, scheduledAt: tournament.scheduledAt, isCurrent: tournament.isCurrent, archivedAt: tournament.archivedAt, status: tournament.status, drawMode: tournament.drawMode,
     teams: tournament.teams.length, canChangeStructure: management.canRemove, teamManagement: management, teamList: tournament.teams.map((team: any) => ({ id: team.id, name: displayName(team), playerOne: team.playerOne, playerTwo: team.playerTwo })),
     repechage: repechage(tournament), updatedAt: tournament.updatedAt,
     matches: tournament.matches.map((match: any) => ({ id: match.id, round: match.round, position: match.position, a: match.teamA ? displayName(match.teamA) : null, b: match.teamB ? displayName(match.teamB) : null, scoreA: match.scoreA, scoreB: match.scoreB, status: match.status, winner: match.winner ? displayName(match.winner) : null })),

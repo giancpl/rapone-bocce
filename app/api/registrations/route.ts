@@ -23,7 +23,7 @@ export async function POST(request: Request) {
     const playerTwo = text(body.playerTwo, "Secondo giocatore");
     await prisma.$transaction(async tx => {
       const tournament = await tx.tournament.findFirst({
-        orderBy: { createdAt: "desc" },
+        where: { isCurrent: true },
         select: { id: true, status: true }
       });
       if (!tournament || tournament.status !== "SETUP") throw Error("Le iscrizioni non sono disponibili");
@@ -38,7 +38,7 @@ export async function POST(request: Request) {
 export async function GET() {
   try {
     const tournament = await prisma.tournament.findFirst({
-      orderBy: { createdAt: "desc" },
+      where: { isCurrent: true },
       select: { id: true, status: true }
     });
     if (!tournament) throw Error("Torneo non trovato");
@@ -57,7 +57,7 @@ export async function PATCH(request: Request) {
   try {
     const body = await request.json().catch(() => ({}));
     const tournament = await prisma.tournament.findFirst({
-      orderBy: { createdAt: "desc" },
+      where: { isCurrent: true },
       select: { id: true }
     });
     if (!tournament) throw Error("Torneo non trovato");

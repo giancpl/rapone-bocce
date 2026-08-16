@@ -4,9 +4,8 @@ import Image from "next/image";
 import { useEffect, useMemo, useRef, useState } from "react";
 import logo from "../logo-hd.png";
 
-const OFFICIAL_START = new Date("2026-08-13T16:00:00+02:00");
 type Match = { id: string; round: number; position: number; a: string | null; b: string | null; scoreA: number; scoreB: number; status: "SCHEDULED" | "READY" | "WAITING" | "LIVE" | "FINISHED"; winner: string | null };
-type Tournament = { name: string; edition: string; status: "SETUP" | "READY" | "LIVE" | "FINISHED"; drawMode?: "PRELIMINARIES" | "REPECHAGE"; teams: number; updatedAt: string; matches: Match[] };
+type Tournament = { id?: string; name: string; edition: string; editionNumber: number; scheduledAt: string | null; status: "SETUP" | "READY" | "LIVE" | "FINISHED"; drawMode?: "PRELIMINARIES" | "REPECHAGE"; teams: number; updatedAt: string; matches: Match[] };
 
 type RegistrationFormProps = {
   playerOne: string;
@@ -18,7 +17,7 @@ type RegistrationFormProps = {
   message: string;
 };
 
-export default function Public({ initial }: { initial: Tournament | null }) {
+export default function Public({ initial, archived = false }: { initial: Tournament | null; archived?: boolean }) {
   const [tournament, setTournament] = useState(initial);
   const [error, setError] = useState("");
   const [playerOne, setPlayerOne] = useState("");
@@ -27,6 +26,7 @@ export default function Public({ initial }: { initial: Tournament | null }) {
   const [sending, setSending] = useState(false);
 
   useEffect(() => {
+    if (archived) return;
     const refresh = async () => {
       try {
         const response = await fetch("/api/state", { cache: "no-store" });
@@ -40,7 +40,7 @@ export default function Public({ initial }: { initial: Tournament | null }) {
     };
     const timer = window.setInterval(refresh, 12000);
     return () => window.clearInterval(timer);
-  }, []);
+  }, [archived]);
 
   const requestRegistration = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -65,11 +65,11 @@ export default function Public({ initial }: { initial: Tournament | null }) {
   };
 
   if (!tournament) {
-    return <main className="landing"><div className="landingCard"><LandingTop /><p className="kicker">51° edizione</p><h1>Torneo di Bocce</h1><p>Le iscrizioni e il tabellone saranno disponibili qui a breve.</p>{error && <p className="softError">{error}</p>}</div></main>;
+    return <main className="landing"><div className="landingCard"><LandingTop /><p className="kicker">Prossima edizione</p><h1>Torneo di Bocce</h1><p>Le iscrizioni e il tabellone saranno disponibili qui a breve.</p><a className="minorButton" href="/archivio">Consulta l’archivio</a>{error && <p className="softError">{error}</p>}</div></main>;
   }
 
   if (tournament.status === "SETUP") {
-    return <main className="landing"><div className="landingCard registrationLanding"><LandingTop /><p className="kicker">51° edizione</p><h1>Torneo di Bocce</h1><p>Iscrivi la tua coppia. La richiesta sarà confermata prima del sorteggio.</p><RegistrationForm playerOne={playerOne} playerTwo={playerTwo} setPlayerOne={setPlayerOne} setPlayerTwo={setPlayerTwo} submit={requestRegistration} sending={sending} message={registrationMessage} />{error && <p className="softError">{error}</p>}</div></main>;
+    return <main className="landing"><div className="landingCard registrationLanding"><LandingTop scheduledAt={tournament.scheduledAt} /><p className="kicker">{tournament.edition}</p><h1>Torneo di Bocce</h1><p>Iscrivi la tua coppia. La richiesta sarà confermata prima del sorteggio.</p><RegistrationForm playerOne={playerOne} playerTwo={playerTwo} setPlayerOne={setPlayerOne} setPlayerTwo={setPlayerTwo} submit={requestRegistration} sending={sending} message={registrationMessage} /><a className="landingArchiveLink" href="/archivio">Consulta le edizioni precedenti</a>{error && <p className="softError">{error}</p>}</div></main>;
   }
 
   const byPriority = (a: Match, b: Match) => a.round - b.round || a.position - b.position;
@@ -87,7 +87,7 @@ export default function Public({ initial }: { initial: Tournament | null }) {
     ...(thirdPlaceMatch?.winner ? [{ place: 3, label: "3° posto", name: thirdPlaceMatch.winner }] : [])
   ] : [];
 
-  return <main className="publicApp"><PublicHero tournament={tournament} live={live.length} next={next.length} />{podium.length > 0 && <Podium entries={podium} />}<nav className="sectionNav" aria-label="Navigazione torneo"><a href="#incontri">Incontri{live.length ? <b>{live.length}</b> : null}</a><a href="#tabellone">Tabellone</a><a href="#risultati">Risultati{completed.length ? <b>{completed.length}</b> : null}</a></nav>{error && <p className="softError">Aggiornamento al prossimo tentativo: {error}</p>}<MatchHighlights active={active} next={next} totalRounds={totalRounds} hasThirdPlace={Boolean(thirdPlaceMatch || tournament.matches.some(match => match.round === totalRounds && match.position === 1))} /><section className="boardSection bracketSection" id="tabellone"><div className="sectionHeading"><h2>Tabellone</h2></div><BracketGuide drawMode={tournament.drawMode} /><Bracket matches={tournament.matches} /></section><section className="boardSection" id="risultati"><div className="sectionHeading"><h2>Risultati</h2><span className="muted">{completed.length} conclusi</span></div><ResultArchive matches={completed} totalRounds={totalRounds} /></section><footer className="siteFooter">Aggiornato alle {new Date(tournament.updatedAt).toLocaleTimeString("it-IT", { hour: "2-digit", minute: "2-digit" })}</footer></main>;
+  return <main className="publicApp"><PublicHero tournament={tournament} live={live.length} next={next.length} archived={archived} />{archived && <div className="archiveNotice"><a href="/archivio">← Tutte le edizioni</a><a className="minorButton" href={"/api/archive/" + tournament.editionNumber + "/export"}>Scarica JSON</a></div>}{podium.length > 0 && <Podium entries={podium} />}<nav className="sectionNav" aria-label="Navigazione torneo">{tournament.status !== "FINISHED" && <a href="#incontri">Incontri{live.length ? <b>{live.length}</b> : null}</a>}<a href="#tabellone">Tabellone</a><a href="#risultati">Risultati{completed.length ? <b>{completed.length}</b> : null}</a><a href="/archivio">Archivio</a></nav>{error && !archived && <p className="softError">Aggiornamento al prossimo tentativo: {error}</p>}{tournament.status !== "FINISHED" && <MatchHighlights active={active} next={next} totalRounds={totalRounds} hasThirdPlace={Boolean(thirdPlaceMatch || tournament.matches.some(match => match.round === totalRounds && match.position === 1))} />}<section className="boardSection bracketSection" id="tabellone"><div className="sectionHeading"><h2>Tabellone</h2></div><BracketGuide drawMode={tournament.drawMode} /><Bracket matches={tournament.matches} /></section><section className="boardSection" id="risultati"><div className="sectionHeading"><h2>Risultati</h2><span className="muted">{completed.length} conclusi</span></div><ResultArchive matches={completed} totalRounds={totalRounds} /></section><footer className="siteFooter">Aggiornato alle {new Date(tournament.updatedAt).toLocaleTimeString("it-IT", { hour: "2-digit", minute: "2-digit" })}</footer></main>;
 }
 
 function Podium({ entries }: { entries: Array<{ place: number; label: string; name: string }> }) {
@@ -98,13 +98,13 @@ function Brand() {
   return <Image className="brandLogo" src={logo} alt="Logo Pro Loco Rapone" priority />;
 }
 
-function LandingTop() {
-  return <div className="landingTop"><Brand /><Countdown compact landing /></div>;
+function LandingTop({ scheduledAt }: { scheduledAt?: string | null }) {
+  return <div className="landingTop"><Brand />{scheduledAt && <Countdown scheduledAt={scheduledAt} compact landing />}</div>;
 }
 
-function PublicHero({ tournament, live, next }: { tournament: Tournament; live: number; next: number }) {
+function PublicHero({ tournament, live, next, archived }: { tournament: Tournament; live: number; next: number; archived: boolean }) {
   const statusLabel = tournament.status === "READY" ? "Pronti al via" : tournament.status === "LIVE" ? "In diretta" : "Concluso";
-  return <header className={"siteHeader heroHeader " + tournament.status.toLowerCase()}><div className="heroIdentity"><Brand /><div><p className="kicker">{tournament.edition}</p><h1>Torneo di Bocce</h1></div></div><div className="heroPanel"><span className={"statusPill " + tournament.status.toLowerCase()}>{tournament.status === "LIVE" && <i />} {statusLabel}</span>{tournament.status === "READY" ? <Countdown compact /> : <TournamentStats teams={tournament.teams} live={live} next={next} />}</div></header>;
+  return <header className={"siteHeader heroHeader " + tournament.status.toLowerCase()}><div className="heroIdentity"><Brand /><div><p className="kicker">{tournament.edition}</p><h1>Torneo di Bocce</h1></div></div><div className="heroPanel"><span className={"statusPill " + tournament.status.toLowerCase()}>{tournament.status === "LIVE" && <i />} {statusLabel}</span>{!archived && tournament.status === "READY" && tournament.scheduledAt ? <Countdown scheduledAt={tournament.scheduledAt} compact /> : <TournamentStats teams={tournament.teams} live={live} next={next} />}</div></header>;
 }
 
 function MatchHighlights({ active, next, totalRounds, hasThirdPlace }: { active: Match[]; next: Match[]; totalRounds: number; hasThirdPlace: boolean }) {
@@ -119,12 +119,13 @@ function RegistrationForm({ playerOne, playerTwo, setPlayerOne, setPlayerTwo, su
   return <form className="registrationForm" onSubmit={submit}><label>Primo giocatore<input required placeholder="Nome e cognome" value={playerOne} onChange={event => setPlayerOne(event.target.value)} /></label><label>Secondo giocatore<input required placeholder="Nome e cognome" value={playerTwo} onChange={event => setPlayerTwo(event.target.value)} /></label><button className="primaryButton" disabled={sending}>{sending ? "Invio…" : "Richiedi iscrizione"}</button>{message && <p className={message.startsWith("Richiesta") ? "formSuccess" : "softError"}>{message}</p>}</form>;
 }
 
-function Countdown({ compact = false, landing = false }: { compact?: boolean; landing?: boolean }) {
+function Countdown({ scheduledAt, compact = false, landing = false }: { scheduledAt: string; compact?: boolean; landing?: boolean }) {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => { const timer = window.setInterval(() => setNow(Date.now()), 1000); return () => window.clearInterval(timer); }, []);
-  const remaining = Math.max(0, OFFICIAL_START.getTime() - now);
+  const officialStart = new Date(scheduledAt);
+  const remaining = Math.max(0, officialStart.getTime() - now);
   const parts = [{ label: "giorni", value: Math.floor(remaining / 86400000) }, { label: "ore", value: Math.floor(remaining / 3600000) % 24 }, { label: "min", value: Math.floor(remaining / 60000) % 60 }, { label: "sec", value: Math.floor(remaining / 1000) % 60 }];
-  return <section className={["countdown", compact ? "compact" : "", landing ? "landingCountdown" : ""].join(" ")}><div className="countdownIntro"><p className="kicker">Inizio ufficiale</p><strong>{remaining ? "13 AGO · 16:00" : "Torneo iniziato"}</strong></div>{remaining > 0 && <div className="countdownUnits">{parts.map(part => <span key={part.label}><b>{String(part.value).padStart(2, "0")}</b><small>{part.label}</small></span>)}</div>}</section>;
+  return <section className={["countdown", compact ? "compact" : "", landing ? "landingCountdown" : ""].join(" ")}><div className="countdownIntro"><p className="kicker">Inizio ufficiale</p><strong>{remaining ? officialStart.toLocaleString("it-IT", { timeZone: "Europe/Rome", day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }).toUpperCase() : "Torneo iniziato"}</strong></div>{remaining > 0 && <div className="countdownUnits">{parts.map(part => <span key={part.label}><b>{String(part.value).padStart(2, "0")}</b><small>{part.label}</small></span>)}</div>}</section>;
 }
 
 function roundName(round: number, total: number) {

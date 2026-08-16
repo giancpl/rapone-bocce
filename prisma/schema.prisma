@@ -1,8 +1,7 @@
-
 generator client {
-  provider = "prisma-client"
-  output   = "../app/generated/prisma"
-  engineType = "client"
+  provider     = "prisma-client"
+  output       = "../app/generated/prisma"
+  engineType   = "client"
   moduleFormat = "esm"
 }
 
@@ -36,23 +35,37 @@ enum RegistrationStatus {
   REJECTED
 }
 
-model Tournament {
-  id                String           @id @default(cuid())
-  name              String
-  edition           String
-  status            TournamentStatus @default(SETUP)
-  drawMode          DrawMode          @default(PRELIMINARIES)
+model Organizer {
+  id                String         @id
   adminPasswordHash String
-  startedAt         DateTime?
-  finishedAt        DateTime?
-  repechageFinalizedAt DateTime?
-  createdAt         DateTime         @default(now())
-  updatedAt         DateTime         @updatedAt
-  teams             Team[]
-  matches           Match[]
+  createdAt         DateTime       @default(now())
+  updatedAt         DateTime       @updatedAt
   sessions          AdminSession[]
-  registrations     Registration[]
+}
+
+model Tournament {
+  id                   String           @id @default(cuid())
+  name                 String
+  edition              String
+  editionNumber        Int              @unique
+  scheduledAt          DateTime?
+  isCurrent            Boolean          @default(false)
+  archivedAt           DateTime?
+  status               TournamentStatus @default(SETUP)
+  drawMode             DrawMode         @default(PRELIMINARIES)
+  adminPasswordHash    String
+  startedAt            DateTime?
+  finishedAt           DateTime?
+  repechageFinalizedAt DateTime?
+  createdAt            DateTime         @default(now())
+  updatedAt            DateTime         @updatedAt
+  teams                Team[]
+  matches              Match[]
+  sessions             AdminSession[]
+  registrations        Registration[]
+
   @@index([status])
+  @@index([isCurrent])
 }
 
 model Team {
@@ -64,34 +77,37 @@ model Team {
   seed         Int?
   paidAt       DateTime?
   createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
   tournament   Tournament @relation(fields: [tournamentId], references: [id], onDelete: Cascade)
   matchesA     Match[]    @relation("MatchTeamA")
   matchesB     Match[]    @relation("MatchTeamB")
   wins         Match[]    @relation("MatchWinner")
+
   @@unique([tournamentId, name])
   @@index([tournamentId])
 }
 
 model Match {
-  id            String      @id @default(cuid())
-  tournamentId  String
-  round         Int
-  position      Int
-  field         Int?
-  teamAId       String?
-  teamBId       String?
-  scoreA        Int         @default(0)
-  scoreB        Int         @default(0)
-  status        MatchStatus @default(SCHEDULED)
-  winnerId      String?
-  startedAt     DateTime?
-  finishedAt    DateTime?
-  createdAt     DateTime    @default(now())
-  updatedAt     DateTime    @updatedAt
-  tournament    Tournament  @relation(fields: [tournamentId], references: [id], onDelete: Cascade)
-  teamA         Team?       @relation("MatchTeamA", fields: [teamAId], references: [id], onDelete: SetNull)
-  teamB         Team?       @relation("MatchTeamB", fields: [teamBId], references: [id], onDelete: SetNull)
-  winner        Team?       @relation("MatchWinner", fields: [winnerId], references: [id], onDelete: SetNull)
+  id           String      @id @default(cuid())
+  tournamentId String
+  round        Int
+  position     Int
+  field        Int?
+  teamAId      String?
+  teamBId      String?
+  scoreA       Int         @default(0)
+  scoreB       Int         @default(0)
+  status       MatchStatus @default(SCHEDULED)
+  winnerId     String?
+  startedAt    DateTime?
+  finishedAt   DateTime?
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+  tournament   Tournament  @relation(fields: [tournamentId], references: [id], onDelete: Cascade)
+  teamA        Team?       @relation("MatchTeamA", fields: [teamAId], references: [id], onDelete: SetNull)
+  teamB        Team?       @relation("MatchTeamB", fields: [teamBId], references: [id], onDelete: SetNull)
+  winner       Team?       @relation("MatchWinner", fields: [winnerId], references: [id], onDelete: SetNull)
+
   @@unique([tournamentId, round, position])
   @@index([tournamentId, status])
   @@index([tournamentId, round])
@@ -100,11 +116,15 @@ model Match {
 model AdminSession {
   id           String     @id @default(cuid())
   tournamentId String
+  organizerId  String?
   tokenHash    String     @unique
   expiresAt    DateTime
   createdAt    DateTime   @default(now())
   tournament   Tournament @relation(fields: [tournamentId], references: [id], onDelete: Cascade)
+  organizer    Organizer? @relation(fields: [organizerId], references: [id], onDelete: Cascade)
+
   @@index([tournamentId, expiresAt])
+  @@index([organizerId, expiresAt])
 }
 
 model Registration {
@@ -116,5 +136,6 @@ model Registration {
   createdAt    DateTime           @default(now())
   reviewedAt   DateTime?
   tournament   Tournament         @relation(fields: [tournamentId], references: [id], onDelete: Cascade)
+
   @@index([tournamentId, status, createdAt])
 }

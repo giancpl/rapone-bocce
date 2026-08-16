@@ -2,7 +2,9 @@
   "name": "rapone-bocce",
   "version": "3.0.0",
   "private": true,
-  "engines": { "node": "22.x" },
+  "engines": {
+    "node": "22.x"
+  },
   "scripts": {
     "dev": "next dev",
     "build": "prisma generate && prisma migrate deploy && next build",
@@ -12,7 +14,9 @@
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",
     "db:deploy": "prisma migrate deploy",
-    "db:studio": "prisma studio"
+    "db:studio": "prisma studio",
+    "test:archive": "node --experimental-strip-types --test tests/archive.test.mjs",
+    "test": "npm run test:bracket && npm run test:archive"
   },
   "dependencies": {
     "@prisma/adapter-pg": "^7.0.0",
